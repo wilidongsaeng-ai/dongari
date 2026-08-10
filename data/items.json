@@ -1,0 +1,21 @@
+{
+  "themes": {
+    "school": {
+      "required_items": ["책", "연필", "지우개", "공책"]
+    },
+    "factory": {
+      "required_items": ["부품", "배터리", "공구", "기계 부품"]
+    },
+    "lab": {
+      "required_items": ["샘플", "데이터 칩", "연구 자료", "실험 도구"]
+    },
+    "hospital": {
+      "required_items": ["의료 키트", "약품", "기록지", "장비"]
+    }
+  },
+  "bonus_items": [
+    {"id": "speed_boost", "name": "속도 증가", "key": "1"},
+    {"id": "vision_block", "name": "시야 차단", "key": "2"},
+    {"id": "shield", "name": "방패", "key": "3"}
+  ]
+}
