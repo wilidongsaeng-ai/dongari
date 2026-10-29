@@ -1,0 +1,2204 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>방 탈출 추격 게임</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#161a22; --accent:#5ac8fa; --danger:#ff4d4d;
+    --wall:#2a2f3a; --floor:#1c2029; --room:#232a36; --door-open:#3aa76d; --door-closed:#a0522d;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:var(--bg);color:#e8ecf3;font-family:'Malgun Gothic',sans-serif;overflow:hidden;}
+  #wrap{display:flex;flex-direction:column;align-items:center;padding:12px;gap:8px;}
+  #hud{width:800px;display:flex;justify-content:space-between;align-items:center;background:var(--panel);
+       border-radius:10px;padding:10px 16px;font-size:14px;}
+  #hud .stage{font-weight:bold;font-size:16px;color:var(--accent);}
+  #itemBarOuter{width:180px;height:14px;background:#0e1117;border-radius:7px;overflow:hidden;border:1px solid #333;}
+  #itemBarInner{height:100%;width:0%;background:linear-gradient(90deg,#5ac8fa,#34d399);transition:width .2s;}
+  .hpBarOuter{width:100%;height:14px;background:#0e1117;border-radius:7px;overflow:hidden;border:1px solid #333;}
+  .hpBarInner{height:100%;width:100%;transition:width .2s;}
+  #bonusRow span{margin-left:10px;}
+  .slot{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;
+        background:#0e1117;border:1px solid #333;font-size:13px;}
+  .slot.active{background:var(--accent);color:#08131a;border-color:var(--accent);font-weight:bold;}
+  .slot small{font-size:10px;opacity:.85;min-width:22px;}
+  #canvasHolder{position:relative;}
+  canvas{background:#000;border-radius:10px;box-shadow:0 0 0 2px #222, 0 8px 30px rgba(0,0,0,.5);}
+  #danger{position:absolute;top:10px;left:50%;transform:translateX(-50%);color:var(--danger);
+          font-weight:bold;font-size:20px;letter-spacing:2px;opacity:0;transition:opacity .15s;
+          text-shadow:0 0 8px rgba(255,0,0,.8);}
+  #danger.show{opacity:1;}
+  #hint{width:800px;background:var(--panel);border-radius:10px;padding:8px 16px;font-size:12.5px;color:#9aa3b2;}
+  .overlay{position:absolute;inset:0;background:rgba(5,6,10,.92);display:none;flex-direction:column;
+           align-items:center;justify-content:center;border-radius:10px;gap:14px;text-align:center;padding:20px;}
+  .overlay.show{display:flex;}
+  .overlay h1{margin:0;font-size:30px;}
+  .overlay p{margin:0;color:#aab;}
+  .btnrow{display:flex;gap:10px;}
+  /* 보스전 체력바 패널: 캔버스를 덮지 않는 작은 상단 패널(클릭이 캔버스까지 통과해야 하므로 .overlay 재사용 안 함) */
+  .bossPanel{position:absolute;inset:0;display:none;pointer-events:none;z-index:5;}
+  .bossPanel.show{display:block;}
+  .bossHud{position:absolute;left:10px;right:10px;display:flex;align-items:center;gap:8px;
+           font-size:11px;color:#e8ecf3;text-shadow:0 1px 2px rgba(0,0,0,.8);}
+  .bossHud.top{top:8px;right:78px;}
+  .bossHud.bottom{bottom:8px;}
+  .hpBarOuter.thin{flex:1;height:10px;}
+  #bossExitTempBtn{position:absolute;top:6px;right:8px;pointer-events:auto;font-size:11px;
+                    padding:3px 8px;border-radius:6px;}
+  button{background:var(--accent);border:none;color:#08131a;font-weight:bold;padding:10px 18px;
+         border-radius:8px;cursor:pointer;font-size:14px;}
+  button.secondary{background:#333a48;color:#e8ecf3;}
+  button:hover{filter:brightness(1.1);}
+  #quizBox input{font-size:18px;padding:6px 10px;border-radius:6px;border:none;width:100px;text-align:center;}
+  #quizQ{font-size:26px;font-weight:bold;color:var(--accent);}
+  .padbtn{background:#232a36;color:#e8ecf3;border:1px solid #3a4252;border-radius:8px;font-size:16px;
+          cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:none;}
+  .padbtn:active{background:var(--accent);color:#08131a;}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <div class="stage" id="stageLabel">STAGE 1</div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span id="itemLabel">아이템 0 / 0</span>
+      <div id="itemBarOuter"><div id="itemBarInner"></div></div>
+    </div>
+    <div id="moneyDisplay" style="font-weight:bold;color:#ffd166;">💰 <span id="moneyValue">0</span>원</div>
+    <div id="bonusRow">
+      <span class="slot" id="slotSpeed">1 ⚡<span id="bSpeed">0</span><small id="speedTimer"></small></span>
+      <span class="slot" id="slotVision">2 👁<span id="bVision">0</span><small id="visionTimer"></small></span>
+      <span class="slot" id="slotShield">3 🛡<span id="bShield">0</span></span>
+    </div>
+  </div>
+  <div id="canvasHolder">
+    <canvas id="game" width="800" height="560" tabindex="0" style="outline:none;"></canvas>
+    <div id="danger">⚠ DANGER</div>
+    <div id="startHint" style="position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+         background:rgba(10,12,18,.85);padding:6px 14px;border-radius:20px;font-size:12.5px;
+         color:#cfd6e4;pointer-events:none;transition:opacity .4s;">게임 화면을 한 번 클릭하면 키보드 조작이 활성화돼요</div>
+
+    <div class="overlay show" id="jobSelectOverlay">
+      <h1 style="color:#5ac8fa;margin-bottom:0;">직업을 선택하세요</h1>
+      <div style="font-size:11px;color:#7d8698;margin-top:-6px;">(이 역할군은 보스전에서만 적용돼요)</div>
+      <div class="btnrow" style="flex-direction:column;gap:10px;width:100%;max-width:340px;">
+        <button class="jobBtn" data-job="warrior" style="text-align:left;">⚔ <b>검사</b> - 근접 무기, 가까이서 확실한 데미지</button>
+        <button class="jobBtn" data-job="archer" style="text-align:left;">🏹 <b>궁수</b> - 원거리 무기, 멀리서 안전하게 공격</button>
+        <button class="jobBtn" data-job="mage" style="text-align:left;">🔮 <b>마법사</b> - 사정거리 제한 없음, 가까울수록 강력</button>
+      </div>
+    </div>
+
+    <div class="overlay" id="quizOverlay">
+      <div id="quizBox">
+        <div style="color:#9aa3b2;margin-bottom:6px;">수학 퀴즈</div>
+        <div id="quizQ">? </div>
+        <div style="margin-top:12px;">
+          <input id="quizInput" type="number" autocomplete="off">
+          <button id="quizSubmit">확인</button>
+        </div>
+        <div id="quizMsg" style="margin-top:8px;color:#9aa3b2;height:18px;"></div>
+      </div>
+    </div>
+
+    <div class="overlay" id="gameoverOverlay">
+      <h1 style="color:var(--danger);">GAME OVER</h1>
+      <p>추격 개체에게 붙잡혔습니다.</p>
+      <div class="btnrow">
+        <button id="restartStageBtn">현재 스테이지 재시작</button>
+        <button id="restartAllBtn" class="secondary">처음부터 다시 시작</button>
+      </div>
+    </div>
+
+    <div class="overlay" id="clearOverlay">
+      <h1 style="color:#34d399;">STAGE CLEAR!</h1>
+      <p id="clearText"></p>
+      <p style="font-size:12px;color:#7d8698;">⚡👁🛡 보유한 보조 아이템은 다음 스테이지에도 그대로 유지돼요</p>
+      <div class="btnrow">
+        <button id="nextStageBtn">다음 스테이지</button>
+      </div>
+    </div>
+
+    <div class="bossPanel" id="bossOverlay">
+      <div id="bossStatusMsg" style="position:absolute;top:46%;left:50%;transform:translate(-50%,-50%);
+           font-size:20px;font-weight:bold;text-shadow:0 2px 6px rgba(0,0,0,.85);pointer-events:none;text-align:center;"></div>
+      <div class="bossHud top">
+        <span style="color:#ff8a8a;white-space:nowrap;">보스</span>
+        <div class="hpBarOuter thin"><div id="bossHpBar" class="hpBarInner" style="background:#ff4d4d;"></div></div>
+        <span id="bossHpText" style="white-space:nowrap;">0/0</span>
+      </div>
+      <div class="bossHud bottom">
+        <span style="color:#8fd3ff;white-space:nowrap;">HP</span>
+        <div class="hpBarOuter thin"><div id="playerHpBar" class="hpBarInner" style="background:#5ac8fa;"></div></div>
+        <span id="playerHpText" style="white-space:nowrap;">0/0</span>
+      </div>
+      <button id="bossExitTempBtn" class="secondary" title="스테이지로 돌아가기">✕</button>
+    </div>
+
+    <div class="overlay" id="shopOverlay">
+      <h1 style="color:#ffd166;">🛒 상점</h1>
+      <p style="color:#9aa3b2;font-size:12px;">보유 금액: 💰 <span id="shopMoney">0</span>원 · 구매 효과는 보스전에서만 적용됩니다</p>
+      <div id="shopList" style="max-height:280px;overflow-y:auto;width:100%;max-width:380px;text-align:left;"></div>
+      <div class="btnrow">
+        <button id="shopCloseBtn" class="secondary">닫기</button>
+      </div>
+    </div>
+  </div>
+  <div id="hint">
+    WASD 이동 · E 문 열기/닫기 · 아이템 위에서 자동 획득 · 퀴즈 타일에서 E로 풀기 ·
+    1 속도증가 · 2 시야차단(적) · 3 방패 사용 · 모든 코인 획득 후 포탈이 있는 방을 찾아 들어가세요.
+  </div>
+  <div id="keyDebug" style="width:800px;text-align:center;font-size:12px;color:#5ac8fa;background:#161a22;
+       border-radius:8px;padding:4px 10px;">마지막 입력: (아직 키를 누르지 않음)</div>
+  <div id="touchPad" style="display:flex;justify-content:space-between;align-items:center;width:800px;">
+    <div id="dpad" style="display:grid;grid-template-columns:48px 48px 48px;grid-template-rows:48px 48px 48px;gap:4px;">
+      <div></div><button class="padbtn" data-key="w">▲</button><div></div>
+      <button class="padbtn" data-key="a">◀</button><div></div><button class="padbtn" data-key="d">▶</button>
+      <div></div><button class="padbtn" data-key="s">▼</button><div></div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="padbtn" data-key="e" style="width:56px;height:48px;">E</button>
+      <button class="padbtn" data-key="1" style="width:48px;height:48px;">⚡</button>
+      <button class="padbtn" data-key="2" style="width:48px;height:48px;">👁</button>
+      <button class="padbtn" data-key="3" style="width:48px;height:48px;">🛡</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   0. 전역 상수 / 스테이지 데이터 (코드-데이터 분리를 흉내낸 설정 함수)
+   ============================================================ */
+const TILE = 28;
+const CANVAS_W = 800, CANVAS_H = 560;
+
+// stages.json 역할: 스테이지 번호로부터 파라미터를 계산
+function getStageConfig(stage){
+  const mapW = clamp(30 + Math.floor(stage/2), 30, 60);
+  const mapH = clamp(22 + Math.floor(stage/3), 22, 46);
+  const playerSpeed = 3.8; // 기존 3.3에서 약 15% 상향
+  // 개체 속도는 "플레이어 속도 대비 비율"로 계산: 1스테이지 85% -> 스테이지당 +4%p -> 107%에서 상한
+  const enemySpeedRatio = clamp(0.85 + (stage-1)*0.04, 0.85, 1.07);
+  return {
+    mapW, mapH,                                       // 열린 맵의 크기(타일) - 방이 커진 만큼 맵도 확장
+    roomMinSize: 5,                                   // 방 최소 크기(가로/세로 공통)
+    roomMaxSize: clamp(8 + Math.floor(stage/8), 8, 12), // 방 최대 크기 - 스테이지 오를수록 조금씩 커짐
+    roomCount: clamp(4 + Math.floor(stage/2), 4, 24), // 스테이지가 오를수록 방 개수 증가
+    itemCount: clamp(Math.round((mapW*mapH)/38), 14, 55), // 맵 면적에 비례해서 아이템 총 개수 증가(상향)
+    enemySpeed: playerSpeed * enemySpeedRatio,
+    enemySpeedRatio,
+    playerSpeed,
+    quizChance: clamp(0.25 + stage*0.01, 0.25, 0.55),
+    quizMaxOperand: 10 + Math.floor(stage/5)*4,
+    quizUseMulDiv: stage >= 8,
+    detectionRadius: clamp(11 + Math.floor(stage/15), 11, 14), // 인식 반경(타일) - 기존 6~8에서 약 1.8배 확대
+    loseTrackTime: 4.0
+  };
+}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+
+/* ============================================================
+   1. 맵 생성 (테두리 1칸 벽 + 열린 공간 + 독립된 사각형 방 N개)
+   ============================================================ */
+// tile types
+const T_WALL=1, T_FLOOR=0, T_ROOM=2, T_DOOR=3;
+
+function shuffle(arr, rng){
+  rng = rng || Math.random;
+  for(let i=arr.length-1;i>0;i--){
+    const j=(rng()*(i+1))|0;
+    [arr[i],arr[j]]=[arr[j],arr[i]];
+  }
+  return arr;
+}
+
+// 스테이지 번호로 항상 같은 결과를 내는 시드 난수 생성기
+// (같은 스테이지를 다시 시작해도 방 구조가 동일하게 나오도록)
+function mulberry32(seed){
+  let s = seed >>> 0;
+  return function(){
+    s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// CORR: 복도 블록 한 변의 타일 수(복도 폭). 블록과 블록 사이는 항상 딱 1칸 벽.
+function buildStageMap(stage){
+  const cfg = getStageConfig(stage);
+  const rng = mulberry32(stage*7919 + 104729); // 같은 스테이지 번호 = 같은 맵
+  const W = cfg.mapW, H = cfg.mapH;
+
+  // 1) 테두리만 1칸 벽, 안쪽은 전부 열린 공간(T_FLOOR)
+  const map = Array.from({length:H}, ()=> new Array(W).fill(T_FLOOR));
+  for(let x=0;x<W;x++){ map[0][x]=T_WALL; map[H-1][x]=T_WALL; }
+  for(let y=0;y<H;y++){ map[y][0]=T_WALL; map[y][W-1]=T_WALL; }
+
+  const doors = {}; // "x,y" -> {open:bool, roomId}
+  const rooms = [];
+  const placed = []; // 배치된 방의 사각형 {x,y,w,h} (겹침 검사용)
+
+  // 2) 독립된 사각형 방을 겹치지 않게, 테두리와도 안 붙게 랜덤 배치
+  let attempts = 0;
+  const maxAttempts = cfg.roomCount * 150;
+  while(rooms.length < cfg.roomCount && attempts < maxAttempts){
+    attempts++;
+    const rw = cfg.roomMinSize + ((rng()*(cfg.roomMaxSize-cfg.roomMinSize+1))|0); // 방 폭 (스테이지별 랜덤 범위)
+    const rh = cfg.roomMinSize + ((rng()*(cfg.roomMaxSize-cfg.roomMinSize+1))|0); // 방 높이
+    if(rw+4 >= W || rh+4 >= H) break; // 맵이 너무 작으면 중단
+
+    // 60% 확률로 "테두리 밀착 모드": 방의 한쪽 면을 테두리 바로 안쪽에 붙인다
+    let rx, ry;
+    if(rng() < 0.6){
+      const side = (rng()*4)|0; // 0:왼쪽 1:오른쪽 2:위 3:아래 벽에 밀착
+      if(side===0){ rx = 1; ry = 1 + ((rng()*(H-rh-2))|0); }
+      else if(side===1){ rx = W-1-rw; ry = 1 + ((rng()*(H-rh-2))|0); }
+      else if(side===2){ ry = 1; rx = 1 + ((rng()*(W-rw-2))|0); }
+      else { ry = H-1-rh; rx = 1 + ((rng()*(W-rw-2))|0); }
+    } else {
+      rx = 1 + ((rng()*(W-rw-2))|0); // 테두리 안쪽 어디든 자유 배치
+      ry = 1 + ((rng()*(H-rh-2))|0);
+    }
+
+    // 다른 방과 최소 2칸 간격을 두어 서로 벽이 붙지 않고 열린 공간으로 떨어지게 함
+    const BUF = 2;
+    let overlap = false;
+    for(const p of placed){
+      if(rx < p.x+p.w+BUF && rx+rw+BUF > p.x && ry < p.y+p.h+BUF && ry+rh+BUF > p.y){
+        overlap = true; break;
+      }
+    }
+    if(overlap) continue;
+
+    // 맵에 쓰기 전에 먼저 "테두리와 맞닿지 않은 벽면"이 최소 하나 있는지 확인 (없으면 이 위치는 버림)
+    const validSides = [];
+    if(ry > 1) validSides.push(0);           // 위쪽 벽 바로 위가 열린 공간(테두리 아님)
+    if(ry+rh < H-1) validSides.push(1);      // 아래쪽
+    if(rx > 1) validSides.push(2);           // 왼쪽
+    if(rx+rw < W-1) validSides.push(3);      // 오른쪽
+    if(validSides.length === 0) continue;    // 사방이 테두리뿐이면 맵에 쓰지 않고 다시 시도
+
+    // 방 벽 + 내부 바닥 그리기
+    for(let y=ry;y<ry+rh;y++){
+      for(let x=rx;x<rx+rw;x++){
+        const isEdge = (x===rx || x===rx+rw-1 || y===ry || y===ry+rh-1);
+        map[y][x] = isEdge ? T_WALL : T_ROOM;
+      }
+    }
+    // 문 하나를 벽면 중 한 곳에 뚫는다 (방마다 문은 정확히 1개) - 맵 바깥 테두리와 맞닿은 면은 후보에서 제외
+    const side = validSides[(rng()*validSides.length)|0];
+    let doorX, doorY;
+    if(side===0){ doorX = rx+1+((rng()*(rw-2))|0); doorY = ry; }
+    else if(side===1){ doorX = rx+1+((rng()*(rw-2))|0); doorY = ry+rh-1; }
+    else if(side===2){ doorX = rx; doorY = ry+1+((rng()*(rh-2))|0); }
+    else { doorX = rx+rw-1; doorY = ry+1+((rng()*(rh-2))|0); }
+    map[doorY][doorX] = T_DOOR;
+
+    const roomId = rooms.length;
+    const tiles = [];
+    for(let y=ry+1;y<ry+rh-1;y++) for(let x=rx+1;x<rx+rw-1;x++) tiles.push([x,y]);
+    const center = [rx + (rw>>1), ry + (rh>>1)];
+
+    doors[doorX+","+doorY] = {open:false, roomId};
+    rooms.push({id:roomId, doorPos:[doorX,doorY], center, tiles,
+                quizPos:null, quizDone:false, isExit:false});
+    placed.push({x:rx, y:ry, w:rw, h:rh});
+  }
+
+  // 퀴즈 배치 (아이템은 더 이상 방 전용이 아니므로 아래에서 전역으로 따로 뽑음)
+  rooms.forEach(r=>{
+    const pool = shuffle(r.tiles.filter(t => t[0]!==r.center[0] || t[1]!==r.center[1]), rng);
+    if(pool.length>0 && rng() < cfg.quizChance){
+      r.quizPos = pool[0];
+    }
+  });
+
+  // 탈출구 방 지정
+  const exitRoom = rooms[(rng()*rooms.length)|0];
+  exitRoom.isExit = true;
+
+  // 열린 공간(T_FLOOR) 타일 목록 - 플레이어/적 시작 위치, 적 순찰용
+  const floorCells = [];
+  for(let y=1;y<H-1;y++) for(let x=1;x<W-1;x++) if(map[y][x]===T_FLOOR) floorCells.push([x,y]);
+
+  const start = floorCells[(rng()*floorCells.length)|0];
+  let bestFar = start, bestDist = -1;
+  for(const [x,y] of floorCells){
+    const d = Math.hypot(x-start[0], y-start[1]);
+    if(d>bestDist){ bestDist=d; bestFar=[x,y]; }
+  }
+
+  return {map, W, H, doors, rooms, start, enemyStart:bestFar, cfg, exitRoomId:exitRoom.id,
+           items: pickItemPositions(map, W, H, rooms, start, rng, cfg.itemCount),
+           // 순수 장식용 데이터 - 충돌/이동 판정과 무관, 렌더링에서만 사용 (맵 구조/로직은 위에서 이미 확정된 뒤라 영향 없음)
+           decorations: pickDecorations(rooms, rng)};
+}
+
+// 방 안에 상자/횃불 같은 장식을 배치 (충돌 없음, 순수 시각 요소)
+function pickDecorations(rooms, rng){
+  const decos = [];
+  rooms.forEach(r=>{
+    const pool = r.tiles.filter(t =>
+      (t[0]!==r.center[0] || t[1]!==r.center[1]) &&
+      (!r.quizPos || t[0]!==r.quizPos[0] || t[1]!==r.quizPos[1])
+    );
+    if(pool.length > 0 && rng() < 0.65){
+      decos.push({type:'crate', pos: pool[(rng()*pool.length)|0]});
+    }
+    // 방 위쪽 벽 중앙에 횃불 하나(문 자리와 겹치지 않을 때만)
+    if(rng() < 0.55){
+      const xs = r.tiles.map(t=>t[0]), ys = r.tiles.map(t=>t[1]);
+      const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys);
+      const wallX = minX + ((maxX-minX)>>1), wallY = minY-1;
+      if(!(r.doorPos[0]===wallX && r.doorPos[1]===wallY)){
+        decos.push({type:'torch', pos:[wallX, wallY]});
+      }
+    }
+  });
+  return decos;
+}
+
+// --- 아이템 스폰: 방 내부 + 복도를 통틀어 "이동 가능한 모든 타일"에서 뽑는다 ---
+// 매 맵 생성마다 스폰 패턴을 랜덤으로 하나 선택해서 다양성을 준다: scatter(낱개 분산) / line(경로형) / cluster(뭉침형)
+function pickItemPositions(map, W, H, rooms, start, rng, count){
+  // 겹치면 안 되는 자리: 탈출구 방의 중심(탈출구 표시 자리)과 퀴즈 타일
+  const reserved = new Set();
+  rooms.forEach(r=>{
+    if(r.isExit) reserved.add(r.center[0]+","+r.center[1]);
+    if(r.quizPos) reserved.add(r.quizPos[0]+","+r.quizPos[1]);
+  });
+
+  // 조건: 벽/문이 아닌 walkable 타일(T_FLOOR=복도, T_ROOM=방)만 후보로 수집
+  const roomTiles = [], corridorTiles = [], allWalkable = [];
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++){
+      const t = map[y][x];
+      if(t !== T_ROOM && t !== T_FLOOR) continue; // 벽/문 제외
+      const key = x+","+y;
+      if(reserved.has(key)) continue;
+      if(t === T_ROOM) roomTiles.push([x,y]); else corridorTiles.push([x,y]);
+      allWalkable.push([x,y]);
+    }
+  }
+
+  const MIN_START_DIST = 3; // 플레이어 시작 위치와 최소 이 거리 이상 떨어짐
+  const farEnoughFromStart = (p) => Math.hypot(p[0]-start[0], p[1]-start[1]) >= MIN_START_DIST;
+
+  const PATTERNS = ['scatter','line','cluster'];
+  const pattern = PATTERNS[(rng()*PATTERNS.length)|0];
+
+  let patternResult;
+  if(pattern === 'line'){
+    patternResult = pickLinePattern(map, W, H, corridorTiles, rng, count, farEnoughFromStart);
+  } else if(pattern === 'cluster'){
+    patternResult = pickClusterPattern(allWalkable, rng, count, farEnoughFromStart);
+  } else {
+    patternResult = pickScatterPattern(roomTiles, corridorTiles, rng, count, farEnoughFromStart);
+  }
+
+  // 동일 구역(반경 내) 최대 개수 제한 - 기존 패턴 로직은 그대로 두고, 확정 단계에서만 체크 추가
+  // 반경 DENSITY_RADIUS 안에 이미 MAX_PER_ZONE개가 있으면 그 이상은 받아들이지 않는다(3개 이상 뭉침 방지)
+  const DENSITY_RADIUS = 2.5, MAX_PER_ZONE = 2;
+  const chosen = [];
+  function wouldViolate(candidate){
+    const test = chosen.concat([candidate]);
+    for(const p of test){
+      let cnt = 0;
+      for(const q of test) if(p !== q && Math.hypot(p[0]-q[0], p[1]-q[1]) <= DENSITY_RADIUS) cnt++;
+      if(cnt >= MAX_PER_ZONE) return true;
+    }
+    return false;
+  }
+  function tryAccept(p){
+    if(chosen.length >= count) return false;
+    if(wouldViolate(p)) return false;
+    chosen.push(p);
+    return true;
+  }
+  patternResult.forEach(tryAccept);
+
+  // 밀도 제한 때문에(특히 cluster 패턴에서) 개수가 모자라면 scatter 후보로 남은 자리를 채운다(같은 밀도 제한 적용)
+  if(chosen.length < count){
+    const already = new Set(chosen.map(p=>p[0]+","+p[1]));
+    const filler = pickScatterPattern(roomTiles, corridorTiles, rng, count*3, farEnoughFromStart)
+      .filter(p => !already.has(p[0]+","+p[1]));
+    for(const p of filler){ if(chosen.length >= count) break; tryAccept(p); }
+  }
+
+  return chosen.map(pos => ({pos, taken:false, type:'coin'})); // type: 향후 다른 종류의 줍는 아이템이 생겨도 구분 가능하도록
+}
+
+// 패턴 1: 기존 방식 - 방/복도 타일을 번갈아 뽑아서 넓게 낱개로 흩어놓는다
+function pickScatterPattern(roomTiles, corridorTiles, rng, count, farEnoughFromStart){
+  const rt = shuffle(roomTiles.slice(), rng), ct = shuffle(corridorTiles.slice(), rng);
+  const MIN_ITEM_DIST = 2; // 아이템끼리 최소 이 거리 이상(=겹치지 않음 + 몰리지 않음)
+  function farEnoughFromChosen(pos, chosen){
+    for(const c of chosen) if(Math.hypot(c[0]-pos[0], c[1]-pos[1]) < MIN_ITEM_DIST) return false;
+    return true;
+  }
+  const chosen = [];
+  let ri = 0, ci = 0, turn = 0;
+  while(chosen.length < count && (ri < rt.length || ci < ct.length)){
+    let cand = null;
+    if(turn === 0 && ri < rt.length) cand = rt[ri++];
+    else if(ci < ct.length) cand = ct[ci++];
+    else if(ri < rt.length) cand = rt[ri++];
+    turn = 1 - turn;
+    if(!cand) continue;
+    if(!farEnoughFromStart(cand)) continue;
+    if(!farEnoughFromChosen(cand, chosen)) continue;
+    chosen.push(cand);
+  }
+  return chosen;
+}
+
+// 패턴 2: 열린 복도 위의 두 지점 사이 최단 경로를 구해서, 그 경로를 따라 일렬로 늘어놓는다
+function pickLinePattern(map, W, H, corridorTiles, rng, count, farEnoughFromStart){
+  function bfsOpenFloor(sx,sy,tx,ty){
+    const key=(x,y)=>x+","+y;
+    const visited=new Set([key(sx,sy)]);
+    const prev=new Map();
+    const q=[[sx,sy]]; let qi=0;
+    const dirs=[[0,-1],[0,1],[-1,0],[1,0]];
+    while(qi<q.length){
+      const [cx,cy]=q[qi++];
+      if(cx===tx && cy===ty) break;
+      for(const [dx,dy] of dirs){
+        const nx=cx+dx, ny=cy+dy;
+        if(nx<0||ny<0||nx>=W||ny>=H) continue;
+        if(map[ny][nx]!==T_FLOOR) continue;
+        const k=key(nx,ny);
+        if(visited.has(k)) continue;
+        visited.add(k); prev.set(k,[cx,cy]);
+        q.push([nx,ny]);
+      }
+    }
+    if(!visited.has(key(tx,ty))) return null;
+    const path=[[tx,ty]]; let cur=[tx,ty];
+    while(!(cur[0]===sx && cur[1]===sy)){ cur = prev.get(key(cur[0],cur[1])); path.push(cur); }
+    return path.reverse();
+  }
+
+  if(corridorTiles.length < 4) return [];
+
+  let best = null;
+  for(let tries=0; tries<12 && !best; tries++){
+    const a = corridorTiles[(rng()*corridorTiles.length)|0];
+    const b = corridorTiles[(rng()*corridorTiles.length)|0];
+    if(Math.hypot(a[0]-b[0], a[1]-b[1]) < 6) continue;
+    const path = bfsOpenFloor(a[0],a[1], b[0],b[1]);
+    if(path && path.length >= Math.min(count, 4)) best = path;
+  }
+  if(!best) return [];
+
+  const usable = best.filter(farEnoughFromStart);
+  const src = usable.length >= count ? usable : best;
+  const chosen = [];
+  const step = Math.max(1, Math.floor(src.length / count));
+  for(let i=0; i<src.length && chosen.length<count; i+=step) chosen.push(src[i]);
+  return chosen;
+}
+
+// 패턴 3: 한 지점(hub)을 중심으로 반경 안의 타일에 여러 개를 뭉쳐서 배치
+function pickClusterPattern(allWalkable, rng, count, farEnoughFromStart){
+  const candidates = allWalkable.filter(farEnoughFromStart);
+  if(candidates.length === 0) return [];
+  const hub = candidates[(rng()*candidates.length)|0];
+  const CLUSTER_RADIUS = 3;
+  const nearby = shuffle(allWalkable.filter(p => Math.hypot(p[0]-hub[0], p[1]-hub[1]) <= CLUSTER_RADIUS), rng);
+  if(nearby.length >= count) return nearby.slice(0, count);
+  const nearbySet = new Set(nearby.map(p=>p[0]+","+p[1]));
+  const rest = shuffle(allWalkable.filter(p => !nearbySet.has(p[0]+","+p[1]) && farEnoughFromStart(p)), rng);
+  return nearby.concat(rest).slice(0, count);
+}
+
+/* ============================================================
+   2. 충돌 / 시야 헬퍼
+   ============================================================ */
+function isBlockedTile(stageData, x, y){
+  if(x<0||y<0||x>=stageData.W||y>=stageData.H) return true;
+  const t = stageData.map[y][x];
+  if(t===T_WALL) return true;
+  if(t===T_DOOR){
+    const d = stageData.doors[x+","+y];
+    return d ? !d.open : true; // 닫힌 문 = 벽처럼 취급 (시야도, 이동도 막음)
+  }
+  return false;
+}
+
+// 두 타일 사이에 벽/닫힌문이 없는지 (정수 격자 supercover 방식)
+function hasLineOfSight(stageData, x0,y0, x1,y1){
+  let dx = Math.abs(x1-x0), dy = Math.abs(y1-y0);
+  let x = x0, y = y0;
+  const sx = x1>x0?1:-1, sy = y1>y0?1:-1;
+  let err = dx-dy;
+  let guard = 0;
+  while(!(x===x1 && y===y1) && guard++ < 2000){
+    if(!(x===x0&&y===y0) && isBlockedTile(stageData,x,y)) return false;
+    const e2 = err*2;
+    if(e2 > -dy){ err -= dy; x += sx; }
+    if(e2 < dx){ err += dx; y += sy; }
+  }
+  return true;
+}
+
+function bfsPath(stageData, sx,sy, tx,ty){
+  if(sx===tx && sy===ty) return [[sx,sy]];
+  const key = (x,y)=>x+","+y;
+  const visited = new Set([key(sx,sy)]);
+  const prev = new Map();
+  const q = [[sx,sy]];
+  let qi = 0;
+  const dirs=[[0,-1],[0,1],[-1,0],[1,0]];
+  while(qi < q.length){
+    const [cx,cy] = q[qi++];
+    for(const [dx,dy] of dirs){
+      const nx=cx+dx, ny=cy+dy;
+      if(isBlockedTile(stageData,nx,ny)) continue;
+      const k = key(nx,ny);
+      if(visited.has(k)) continue;
+      visited.add(k);
+      prev.set(k, [cx,cy]);
+      if(nx===tx && ny===ty){
+        // 경로 복원
+        const path=[[nx,ny]];
+        let cur=[nx,ny];
+        while(!(cur[0]===sx&&cur[1]===sy)){
+          cur = prev.get(key(cur[0],cur[1]));
+          path.push(cur);
+        }
+        return path.reverse();
+      }
+      q.push([nx,ny]);
+    }
+  }
+  return null;
+}
+
+function whichRoom(stageData, x, y){
+  const t = stageData.map[y]?.[x];
+  if(t !== T_ROOM) return null;
+  for(const r of stageData.rooms){
+    for(const [tx,ty] of r.tiles) if(tx===x && ty===y) return r;
+  }
+  return null;
+}
+
+/* ============================================================
+   3. 게임 상태
+   ============================================================ */
+const state = {
+  stage: 1,
+  stageData: null,
+  player: {x:0,y:0, speed:3.3, facing:[0,1], money:0, job:null}, // job: 'warrior'|'archer'|'mage' - 직업 선택 화면에서 결정
+  // type: 'cat' 고정 - 추후 보스 등 다른 개체 타입을 추가할 확장 지점.
+  // 지금은 state.enemy가 단일 객체라 여러 마리/보스를 넣으려면 state.enemies 배열로
+  // 바꾸고 updateEnemy/render를 그 배열에 대해 반복하도록 구조를 바꿔야 함(현재는 미적용).
+  enemy: {x:0,y:0, path:null, pathIdx:0, mode:'patrol', lostTimer:0, blindUntil:0, facing:[1,0], type:'cat'},
+  itemsCollected: 0,
+  itemsRequired: 0,
+  exitActive: false,
+  exitRevealed: false,
+  bonus: {speed:0, vision:0, shield:0},
+  speedBoostUntil: 0,
+  shieldInvulnUntil: 0,
+  running: false,
+  scene: 'stage', // 'stage' | 'boss' - 보스전은 별도 씬으로 분리
+  playerHp: 0,    // 보스전 전용 체력(평소 스테이지에는 체력 개념 없음)
+  boss: null,     // {hp, maxHp, attack} - 보스전 진입 시에만 생성
+  bossAttackTimer: 0,
+  bossPattern: {active:null, cooldownTimer:0, telegraphTimer:0, phase:null, dashDir:null, dashTimer:0, dashHit:false, aoeHit:false, cycleIndex:0},
+  projectiles: [],
+  lastPlayerHit: 0,
+  bossHitFlashUntil: 0,
+  playerHitFlashUntil: 0,
+  rangeMissFlashUntil: 0,
+  bossOutcome: null,
+  shopState: {equippedWeapon:null, equippedArmor:null, potions:0}, // 상점 구매 효과 - 보스전에서만 적용
+  bossArena: null,
+  savedPlayerPos: null,
+  guidePath: null,   // 포탈까지의 점선 가이드 경로(전부 획득 후에만 채워짐)
+  guideAcc: 0,       // 가이드 경로 재계산 주기 타이머(매 프레임 재계산 방지)
+  keys: {},
+  quizActive: null, // {room}
+  lastTime: 0,
+  thinkAcc: 0
+};
+
+function startStage(stage){
+  state.stage = stage;
+  const sd = buildStageMap(stage);
+  state.stageData = sd;
+  state.player.x = sd.start[0] + 0.5;
+  state.player.y = sd.start[1] + 0.5;
+  state.player.speed = sd.cfg.enemySpeed; // 요청대로 개체 속도와 완전히 동일하게 맞춤
+  state.enemy.x = sd.enemyStart[0] + 0.5;
+  state.enemy.y = sd.enemyStart[1] + 0.5;
+  state.enemy.path = null; state.enemy.pathIdx = 0; state.enemy.mode='patrol'; state.enemy.lostTimer=0; state.enemy.blindUntil=0;
+  state.itemsCollected = 0;
+  state.itemsRequired = sd.items.length;
+  state.exitActive = false;
+  state.scene = 'stage';
+  state.guidePath = null;
+  state.guideAcc = 0;
+  state.exitRevealed = false;
+  state.speedBoostUntil = 0;
+  document.getElementById('stageLabel').textContent = 'STAGE ' + stage;
+  updateHUD();
+  hideOverlays();
+  state.running = true;
+}
+
+function updateHUD(){
+  document.getElementById('itemLabel').textContent = `아이템 ${state.itemsCollected} / ${state.itemsRequired}`;
+  document.getElementById('itemBarInner').style.width = (100*state.itemsCollected/Math.max(1,state.itemsRequired))+'%';
+  document.getElementById('moneyValue').textContent = state.player.money;
+  document.getElementById('bSpeed').textContent = state.bonus.speed;
+  document.getElementById('bVision').textContent = state.bonus.vision;
+  document.getElementById('bShield').textContent = state.bonus.shield;
+}
+
+// --- 상점 연동용 인터페이스 (지금은 실제 상점 UI 없음 - 나중에 이 함수만 호출하면 됨) ---
+// 사용 예시: if(trySpendMoney(50)) { /* 아이템 지급 등 */ } else { /* "돈이 부족합니다" 안내 */ }
+function trySpendMoney(amount){
+  if(state.player.money < amount) return false;
+  state.player.money -= amount;
+  updateHUD();
+  return true;
+}
+function addMoney(amount){
+  state.player.money += amount;
+  updateHUD();
+}
+
+function hideOverlays(){
+  document.getElementById('gameoverOverlay').classList.remove('show');
+  document.getElementById('clearOverlay').classList.remove('show');
+  document.getElementById('quizOverlay').classList.remove('show');
+  document.getElementById('bossOverlay').classList.remove('show');
+  document.getElementById('shopOverlay').classList.remove('show');
+}
+
+/* ============================================================
+   4. 입력
+   ============================================================ */
+document.getElementById('canvasHolder').addEventListener('click', ()=>{
+  document.getElementById('game').focus();
+  document.getElementById('startHint').style.opacity = '0';
+});
+// 클릭 없이도 바로 조작되도록 로드 시 자동 포커스 시도
+window.addEventListener('load', ()=> document.getElementById('game').focus());
+setTimeout(()=> document.getElementById('game').focus(), 150);
+setTimeout(()=>{ document.getElementById('startHint').style.opacity = '0'; }, 4000);
+
+window.addEventListener('keydown', e=>{
+  const k = e.key.toLowerCase();
+  if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)) e.preventDefault();
+  document.getElementById('startHint').style.opacity = '0';
+  keyDebugCount++;
+  document.getElementById('keyDebug').textContent = `마지막 입력: "${e.key}" (총 ${keyDebugCount}회 감지됨)`;
+  state.keys[k] = true;
+  if(state.quizActive) return;
+  if(k==='e') tryInteract();
+  if(e.key==='1') useBonus('speed');
+  if(e.key==='2') useBonus('vision');
+  if(e.key==='3') useBonus('shield');
+});
+window.addEventListener('keyup', e=>{ state.keys[e.key.toLowerCase()] = false; });
+let keyDebugCount = 0;
+
+// 화면 터치/클릭 버튼 (키보드가 안 먹히는 환경 대비용 조작 패드)
+document.querySelectorAll('.padbtn').forEach(btn=>{
+  const k = btn.dataset.key;
+  const press = (ev)=>{
+    ev.preventDefault();
+    document.getElementById('startHint').style.opacity='0';
+    state.keys[k] = true;
+    if(k==='e') tryInteract();
+    if(k==='1') useBonus('speed');
+    if(k==='2') useBonus('vision');
+    if(k==='3') useBonus('shield');
+  };
+  const release = (ev)=>{ ev.preventDefault(); state.keys[k] = false; };
+  btn.addEventListener('mousedown', press);
+  btn.addEventListener('touchstart', press, {passive:false});
+  btn.addEventListener('mouseup', release);
+  btn.addEventListener('mouseleave', release);
+  btn.addEventListener('touchend', release);
+  btn.addEventListener('touchcancel', release);
+});
+
+function useBonus(type){
+  if(type==='speed' && state.bonus.speed>0){
+    state.bonus.speed--; state.speedBoostUntil = performance.now()+3000; updateHUD(); // 정확히 3초
+  } else if(type==='vision' && state.bonus.vision>0){
+    state.bonus.vision--; state.enemy.blindUntil = performance.now()+1500; updateHUD();
+  } else if(type==='shield' && state.bonus.shield>0){
+    // 방패는 보유만 하면 자동 발동되므로 수동 사용은 없음(안내만)
+  }
+}
+
+// 보조 아이템 슬롯(1/2/3)의 보유/활성 상태를 매 프레임 화면에 반영
+function updateBonusUI(){
+  const now = performance.now();
+  const speedActive = now < state.speedBoostUntil;
+  const slotSpeed = document.getElementById('slotSpeed');
+  slotSpeed.classList.toggle('active', speedActive);
+  document.getElementById('speedTimer').textContent = speedActive ? Math.ceil((state.speedBoostUntil-now)/1000)+'s' : '';
+
+  const visionActive = now < state.enemy.blindUntil;
+  const slotVision = document.getElementById('slotVision');
+  slotVision.classList.toggle('active', visionActive);
+  document.getElementById('visionTimer').textContent = visionActive ? Math.ceil((state.enemy.blindUntil-now)/1000)+'s' : '';
+
+  document.getElementById('slotShield').classList.toggle('active', state.bonus.shield>0);
+}
+
+// 상호작용 가능한 대상(문 또는 퀴즈)을 판정만 하는 함수 - 실제 동작 실행과 화면 표시 양쪽에서 재사용
+function getInteractionTarget(){
+  const sd = state.stageData;
+  const px = Math.floor(state.player.x), py = Math.floor(state.player.y);
+  const room = whichRoom(sd, px, py);
+  if(room && room.quizPos && !room.quizDone && room.quizPos[0]===px && room.quizPos[1]===py){
+    return {type:'quiz', pos:[px,py], room};
+  }
+  // 포탈: 활성화되어 있고 정확히 중심 타일 위에 서 있을 때만 상호작용 가능
+  if(room && room.isExit && state.exitActive && room.center[0]===px && room.center[1]===py){
+    return {type:'portal', pos:[px,py], room};
+  }
+  let nearestDoor = null, nearestDist = 1.6, nearestPos = null;
+  for(const key in sd.doors){
+    const [dx,dy] = key.split(',').map(Number);
+    const dist = Math.hypot(state.player.x-(dx+0.5), state.player.y-(dy+0.5));
+    if(dist < nearestDist){ nearestDist = dist; nearestDoor = key; nearestPos = [dx,dy]; }
+  }
+  if(nearestDoor) return {type:'door', pos:nearestPos, doorKey:nearestDoor};
+  return null;
+}
+
+function tryInteract(){
+  const target = getInteractionTarget();
+  if(!target) return;
+  if(target.type === 'quiz'){
+    openQuiz(target.room);
+  } else if(target.type === 'portal'){
+    enterBossScene();
+  } else if(target.type === 'door'){
+    state.stageData.doors[target.doorKey].open = !state.stageData.doors[target.doorKey].open;
+  }
+}
+
+// --- 씬 전환: 스테이지 <-> 보스전 ---
+// 보스 스탯 공식: 기존 개체 속도 곡선(초반에 빠르게 오르다 완만해지는 형태)과 결을 맞춤
+function getBossConfig(stage){
+  return {
+    maxHp: 80 + stage*12,           // 스테이지1=92, 10=200, 30=440
+    attack: +(8 + stage*1.2).toFixed(1), // 스테이지1=9.2, 10=20, 30=44
+    speed: +(1.3 + stage*0.03).toFixed(2) // 스테이지1=1.33, 10=1.6, 30=2.2 (아레나 타일/초)
+  };
+}
+function enterBossScene(){
+  state.scene = 'boss';
+  state.running = false; // 스테이지 쪽 업데이트(추격/이동) 정지
+  state.playerHp = 100;  // 보스전 진입 시 체력 100 고정
+  if(state.shopState.potions > 0){
+    state.shopState.potions--; // 물약 1개 자동 소모 (구매 효과는 보스전에서만 적용)
+    const potionItem = SHOP_ITEMS.find(i=>i.id==='p1');
+    state.playerHp += potionItem.effect.value;
+  }
+  const cfg = getBossConfig(state.stage);
+  state.boss = {hp: cfg.maxHp, maxHp: cfg.maxHp, attack: cfg.attack, speed: cfg.speed, facing:[-1,0]};
+  state.bossAttackTimer = 0;
+  state.bossPattern = {active:null, cooldownTimer:1.5, telegraphTimer:0, phase:null, dashDir:null, dashTimer:0, dashHit:false, aoeHit:false, cycleIndex:0};
+  state.projectiles = [];
+  state.bossStrafeDir = 1;
+  state.bossStrafeTimer = 0;
+  state.lastPlayerHit = 0;
+  state.bossHitFlashUntil = 0;
+  state.playerHitFlashUntil = 0;
+  state.bossOutcome = null; // 'win' | 'lose' | null(전투 중)
+
+  // 스테이지 좌표를 저장해두고(돌아갈 때 복원), 아레나 전용 좌표로 플레이어/보스 배치
+  state.savedPlayerPos = {x: state.player.x, y: state.player.y};
+  state.bossArena = generateBossArena();
+  state.player.x = BOSS_ARENA_W/2 + 0.5;
+  state.player.y = BOSS_ARENA_H - 2.5;
+  state.player.facing = [0,-1];
+  state.boss.x = BOSS_ARENA_W/2;
+  state.boss.y = 3;
+
+  document.getElementById('bossStatusMsg').textContent = '';
+  document.getElementById('bossExitTempBtn').style.display = '';
+  document.getElementById('bossOverlay').classList.add('show');
+  updateBossUI();
+}
+function exitBossScene(){
+  state.scene = 'stage';
+  if(state.savedPlayerPos){
+    state.player.x = state.savedPlayerPos.x;
+    state.player.y = state.savedPlayerPos.y;
+    state.savedPlayerPos = null;
+  }
+  document.getElementById('bossOverlay').classList.remove('show');
+  state.running = true;
+}
+function updateBossUI(){
+  if(!state.boss) return;
+  document.getElementById('bossHpText').textContent = `${Math.max(0,Math.round(state.boss.hp))} / ${state.boss.maxHp}`;
+  document.getElementById('bossHpBar').style.width = (100*Math.max(0,state.boss.hp)/state.boss.maxHp)+'%';
+  document.getElementById('playerHpText').textContent = `${Math.max(0,Math.round(state.playerHp))} / 100`;
+  document.getElementById('playerHpBar').style.width = Math.max(0,state.playerHp)+'%';
+}
+
+// --- 전투 로직: 마우스 클릭으로 보스 공격, 보스는 주기적으로 반격 ---
+// --- 상점 아이템 데이터 (배열로 분리 - 나중에 항목 추가는 이 배열에만 더하면 됨) ---
+const SHOP_ITEMS = [
+  // job: 장착 가능한 직업 / type: melee·ranged·magic / cooldown(ms): 생략하면 기본 클릭 쿨다운(공격 속도형 무기에만 지정)
+  // atk는 직업 기본 데미지에 더해짐. range는 고정형 직업(검사·궁수)의 사정거리를 덮어씀(마법사는 거리 감쇠라 range 없음)
+  {id:'w1', category:'weapon', job:'warrior', type:'melee',  name:'낡은 검',        price:60,  effect:{type:'atk', value:5},  range:1.8, visual:'sword',  desc:'공격력 +5 · 근접'},
+  {id:'w2', category:'weapon', job:'warrior', type:'melee',  name:'강철 도끼',      price:150, effect:{type:'atk', value:12}, range:1.8, visual:'axe',    desc:'공격력 +12 · 근접'},
+  {id:'w4', category:'weapon', job:'warrior', type:'melee',  name:'쾌검 레이피어',  price:130, effect:{type:'atk', value:3},  range:2.0, cooldown:170, visual:'rapier', desc:'공격력 +3 · 사정거리 2.0 · 공격 속도 빠름'},
+  {id:'w3', category:'weapon', job:'archer',  type:'ranged', name:'사냥용 활',      price:130, effect:{type:'atk', value:8},  range:5.5, visual:'bow',     desc:'공격력 +8 · 원거리'},
+  {id:'w5', category:'weapon', job:'archer',  type:'ranged', name:'장궁',           price:200, effect:{type:'atk', value:14}, range:7.5, visual:'longbow', desc:'공격력 +14 · 사정거리 7.5 · 원거리'},
+  {id:'w6', category:'weapon', job:'mage',    type:'magic',  name:'수정 지팡이',    price:110, effect:{type:'atk', value:6},  visual:'crystalStaff', desc:'공격력 +6 · 마법(거리 감쇠)'},
+  {id:'w7', category:'weapon', job:'mage',    type:'magic',  name:'대마법사의 지팡이', price:220, effect:{type:'atk', value:12}, cooldown:240, visual:'archStaff', desc:'공격력 +12 · 공격 속도 빠름 · 마법'},
+  {id:'a1', category:'armor',  name:'가죽 갑옷', price:100, effect:{type:'defense', value:0.15}, desc:'받는 피해 15% 감소'},
+  {id:'p1', category:'potion', name:'회복 물약', price:40,  effect:{type:'heal', value:30},   desc:'다음 보스전 시작 체력 +30 (1회 소모)'}
+];
+const BASE_ATTACK_RANGE = 1.6; // 직업 정보가 없을 때의 폴백 사정거리
+
+// --- 직업별 전투 데이터 (하드코딩 금지: 직업 추가/밸런스 조정은 이 배열만 고치면 됨) ---
+// attackType: 'fixed'  = 사정거리(range) 안이면 baseDamage 고정 데미지
+//             'falloff' = 사정거리 제한 없음, 거리가 멀수록 데미지 감소
+//                         damage = baseDamage * (maxDist - dist) / maxDist  (0 미만이면 0)
+// maxDist(타일 단위): falloff에서 데미지가 0이 되는 거리. 'arena'면 아레나 대각선 길이를 사용
+const JOB_DATA = [
+  {id:'warrior', name:'검사',   attackType:'fixed',   range:1.8, baseDamage:12, defaultWeapon:{name:'기본 검',  visual:'sword'}},
+  {id:'archer',  name:'궁수',   attackType:'fixed',   range:5.5, baseDamage:9,  defaultWeapon:{name:'기본 활',  visual:'bow'}},
+  {id:'mage',    name:'마법사', attackType:'falloff', range:null, baseDamage:20, maxDist:'arena', defaultWeapon:{name:'기본 지팡이', visual:'staff'}}
+];
+// 지금 캐릭터에 그려야 할 무기 모양: 상점 장착 무기가 있으면 그 visual, 없으면 직업 기본 무기
+function canUseWeapon(item){ return !!item && item.category==='weapon' && item.job === state.player.job; }
+// 장착 중인 무기 (직업이 맞지 않는 무기는 장착돼 있어도 없는 것으로 취급 → 안전장치)
+function getEquippedWeapon(){
+  const w = SHOP_ITEMS.find(i=>i.id===state.shopState.equippedWeapon);
+  return canUseWeapon(w) ? w : null;
+}
+function getEquippedWeaponVisual(){
+  const w = getEquippedWeapon();
+  if(w && w.visual) return w.visual;
+  const job = getJobData();
+  return job ? job.defaultWeapon.visual : null;
+}
+function getJobData(){
+  return JOB_DATA.find(j=>j.id===state.player.job) || null;
+}
+function getFalloffMaxDist(job){
+  if(job.maxDist === 'arena') return Math.hypot(BOSS_ARENA_W, BOSS_ARENA_H); // 아레나 대각선
+  return job.maxDist;
+}
+// 직업별 사정거리(타일). 제한 없으면 null. 장착 무기에 range가 있으면 고정형 직업은 무기 range가 우선
+function getPlayerAttackRange(){
+  const job = getJobData();
+  if(!job) return BASE_ATTACK_RANGE;
+  if(job.attackType === 'falloff') return null;
+  const w = getEquippedWeapon();
+  return (w && w.range) ? w.range : job.range;
+}
+// 공격 속도: 장착 무기에 cooldown이 있으면 그 값, 없으면 기본 클릭 쿨다운(ms)
+function getPlayerAttackCooldown(){
+  const w = getEquippedWeapon();
+  return (w && w.cooldown) ? w.cooldown : PLAYER_CLICK_COOLDOWN;
+}
+// 공격 판정: 직업별로 분기해서 {hit:boolean, damage:number} 반환
+function calcAttack(dist){
+  const job = getJobData();
+  const w = getEquippedWeapon();
+  const atkBonus = (w && w.effect && w.effect.type==='atk') ? w.effect.value : 0;
+  if(!job){ // 직업 미선택 폴백(기존 동작 유지)
+    return dist <= BASE_ATTACK_RANGE ? {hit:true, damage:PLAYER_CLICK_DAMAGE + atkBonus} : {hit:false, damage:0};
+  }
+  if(job.attackType === 'falloff'){
+    const maxD = getFalloffMaxDist(job);
+    const dmg = Math.max(0, (job.baseDamage + atkBonus) * (maxD - dist) / maxD);
+    return {hit: dmg > 0, damage: Math.round(dmg)};
+  }
+  // 'fixed'
+  const range = getPlayerAttackRange();
+  if(dist > range) return {hit:false, damage:0};
+  return {hit:true, damage: job.baseDamage + atkBonus};
+}
+const CATEGORY_LABELS = {weapon:'⚔ 무기', armor:'🛡 방어구', potion:'🧪 물약'};
+
+function buyItem(id){
+  const item = SHOP_ITEMS.find(i=>i.id===id);
+  if(!item) return;
+  if(item.category === 'potion'){
+    if(!trySpendMoney(item.price)) return;
+    state.shopState.potions++;
+  } else if(item.category === 'weapon'){
+    if(!canUseWeapon(item)) return; // 다른 직업 전용 무기는 구매/장착 불가
+    if(state.shopState.equippedWeapon === id) return; // 이미 장착 중
+    if(!trySpendMoney(item.price)) return;
+    state.shopState.equippedWeapon = id;
+  } else if(item.category === 'armor'){
+    if(state.shopState.equippedArmor === id) return;
+    if(!trySpendMoney(item.price)) return;
+    state.shopState.equippedArmor = id;
+  }
+  renderShopUI();
+}
+
+function renderShopUI(){
+  document.getElementById('shopMoney').textContent = state.player.money;
+  const list = document.getElementById('shopList');
+  list.innerHTML = '';
+  ['weapon','armor','potion'].forEach(cat=>{
+    const header = document.createElement('div');
+    header.textContent = CATEGORY_LABELS[cat];
+    header.style.cssText = 'margin:10px 0 4px;font-weight:bold;color:#e8ecf3;';
+    list.appendChild(header);
+    SHOP_ITEMS.filter(i=>i.category===cat).forEach(item=>{
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;background:#0e1117;border:1px solid #2a2f3a;border-radius:8px;padding:8px 10px;margin-bottom:6px;';
+      let btnLabel = item.price+'원';
+      let disabled = false;
+      let jobTag = '';
+      if(cat==='weapon'){
+        const jd = JOB_DATA.find(j=>j.id===item.job);
+        jobTag = ` <span style="font-size:10px;color:#5ac8fa;">[${jd?jd.name:item.job} 전용]</span>`;
+        if(!canUseWeapon(item)){ btnLabel='🔒 '+(jd?jd.name:'')+' 전용'; disabled=true; }
+      }
+      if(cat==='weapon' && state.shopState.equippedWeapon===item.id && canUseWeapon(item)){ btnLabel='장착됨'; disabled=true; }
+      if(cat==='armor' && state.shopState.equippedArmor===item.id){ btnLabel='장착됨'; disabled=true; }
+      if(cat==='potion' && state.shopState.potions>0){ btnLabel = item.price+'원 (보유 '+state.shopState.potions+')'; }
+      row.innerHTML = `
+        <div>
+          <div style="font-size:13px;color:#e8ecf3;">${item.name}${jobTag}</div>
+          <div style="font-size:11px;color:#8d97ab;">${item.desc}</div>
+        </div>
+        <button data-id="${item.id}" ${disabled?'disabled':''} style="${disabled?'opacity:.5;':''}">${btnLabel}</button>
+      `;
+      list.appendChild(row);
+    });
+  });
+  list.querySelectorAll('button[data-id]').forEach(btn=>{
+    btn.addEventListener('click', ()=> buyItem(btn.dataset.id));
+  });
+}
+function openShop(){
+  renderShopUI();
+  document.getElementById('shopOverlay').classList.add('show');
+}
+function closeShop(){
+  document.getElementById('shopOverlay').classList.remove('show');
+}
+
+const BOSS_HIT_RADIUS = 30; // 보스 클릭 판정 반경(px) - 보스 위치는 이제 아레나 좌표에서 매번 계산
+const EXIT_OBJ = {x: CANVAS_W*0.28, y: CANVAS_H*0.6, r: 30};
+const SHOP_OBJ = {x: CANVAS_W*0.72, y: CANVAS_H*0.6, r: 30};
+const PLAYER_CLICK_DAMAGE = 10;
+const PLAYER_CLICK_COOLDOWN = 300; // ms
+
+// 거리 유지형 이동: 너무 멀면 접근, 너무 가까우면 후퇴, 적당하면 좌우로 스트레이프
+function updateBossMovement(dt){
+  if(!state.boss || state.bossOutcome) return;
+  if(state.bossPattern.active) return; // 공격 패턴 진행 중(돌진 포함)에는 평상시 거리유지 이동을 멈춤
+  const b = state.boss, p = state.player;
+  const dx = p.x-b.x, dy = p.y-b.y;
+  const dist = Math.hypot(dx,dy) || 0.0001;
+  const ux = dx/dist, uy = dy/dist;
+  const PREFERRED = 4.5, BAND = 1.2;
+
+  state.bossStrafeTimer += dt;
+  if(state.bossStrafeTimer > 2.5){ state.bossStrafeTimer = 0; state.bossStrafeDir *= -1; } // 주기적으로 방향 전환
+
+  let mx, my;
+  if(dist > PREFERRED+BAND){
+    mx = ux; my = uy; // 너무 멀면 접근
+  } else if(dist < PREFERRED-BAND){
+    mx = -ux; my = -uy; // 너무 가까우면 후퇴
+  } else {
+    mx = -uy*state.bossStrafeDir; my = ux*state.bossStrafeDir; // 적정 거리면 좌우로 원을 그리듯 이동
+  }
+  if(Math.abs(mx) > 0.15) b.facing = [mx>0?1:-1, 0];
+  bossTryMove(b, mx*b.speed*dt, my*b.speed*dt);
+}
+
+// --- 보스 공격 패턴 (투사체 / 돌진 / 근접 범위) - 쿨다운 후 순환 선택, 텔레그래프 -> 판정 순서 ---
+const BOSS_PATTERN_TYPES = ['projectile','dash','aoe'];
+
+function applyDamageToPlayer(amount){
+  const armorItem = SHOP_ITEMS.find(i=>i.id===state.shopState.equippedArmor);
+  const reduction = armorItem ? armorItem.effect.value : 0; // 장착한 방어구가 있으면 피해 감소율 적용
+  state.playerHp -= amount * (1-reduction);
+  state.playerHitFlashUntil = performance.now() + 250;
+  updateBossUI();
+  if(state.playerHp <= 0){
+    state.playerHp = 0;
+    onBossDefeat();
+  }
+}
+
+function startBossPattern(){
+  const bp = state.bossPattern;
+  bp.active = BOSS_PATTERN_TYPES[bp.cycleIndex % BOSS_PATTERN_TYPES.length];
+  bp.cycleIndex++;
+  if(bp.active === 'projectile'){
+    bp.telegraphTimer = 0.45;
+  } else if(bp.active === 'dash'){
+    bp.phase = 'telegraph'; bp.telegraphTimer = 0.6; bp.dashHit = false;
+  } else if(bp.active === 'aoe'){
+    bp.telegraphTimer = 0.5; bp.aoeHit = false;
+  }
+}
+function endBossPattern(){
+  state.bossPattern.active = null;
+  state.bossPattern.cooldownTimer = 1.8 + Math.random()*1.0; // 다음 공격까지 쿨다운
+}
+function fireProjectile(){
+  const dx = state.player.x-state.boss.x, dy = state.player.y-state.boss.y;
+  const len = Math.hypot(dx,dy) || 1;
+  state.projectiles.push({x:state.boss.x, y:state.boss.y, dx:dx/len, dy:dy/len, speed:6, life:3});
+}
+
+function updateBossCombat(dt){
+  if(!state.boss || state.bossOutcome) return; // 이미 승패가 갈렸으면 더 이상 진행 안 함
+
+  // 투사체 이동/충돌은 패턴 상태와 무관하게 항상 처리
+  for(let i=state.projectiles.length-1; i>=0; i--){
+    const proj = state.projectiles[i];
+    proj.x += proj.dx*proj.speed*dt;
+    proj.y += proj.dy*proj.speed*dt;
+    proj.life -= dt;
+    const dist = Math.hypot(state.player.x-proj.x, state.player.y-proj.y);
+    if(dist < 0.5){
+      applyDamageToPlayer(state.boss.attack*0.7);
+      state.projectiles.splice(i,1);
+      continue;
+    }
+    if(proj.life <= 0 || bossIsBlocked(proj.x,proj.y)) state.projectiles.splice(i,1);
+  }
+
+  const bp = state.bossPattern;
+  if(bp.active === null){
+    bp.cooldownTimer -= dt;
+    if(bp.cooldownTimer <= 0) startBossPattern();
+    return;
+  }
+
+  if(bp.active === 'projectile'){
+    bp.telegraphTimer -= dt;
+    if(bp.telegraphTimer <= 0){ fireProjectile(); endBossPattern(); }
+  } else if(bp.active === 'dash'){
+    if(bp.phase === 'telegraph'){
+      bp.telegraphTimer -= dt;
+      if(bp.telegraphTimer <= 0){
+        bp.phase = 'dashing';
+        const dx = state.player.x-state.boss.x, dy = state.player.y-state.boss.y;
+        const len = Math.hypot(dx,dy) || 1;
+        bp.dashDir = [dx/len, dy/len];
+        bp.dashTimer = 0.5;
+      }
+    } else if(bp.phase === 'dashing'){
+      bp.dashTimer -= dt;
+      bossTryMove(state.boss, bp.dashDir[0]*state.boss.speed*4*dt, bp.dashDir[1]*state.boss.speed*4*dt);
+      if(!bp.dashHit){
+        const dist = Math.hypot(state.player.x-state.boss.x, state.player.y-state.boss.y);
+        if(dist < 1.0){ applyDamageToPlayer(state.boss.attack*1.3); bp.dashHit = true; }
+      }
+      if(bp.dashTimer <= 0) endBossPattern();
+    }
+  } else if(bp.active === 'aoe'){
+    bp.telegraphTimer -= dt;
+    if(bp.telegraphTimer <= 0 && !bp.aoeHit){
+      const dist = Math.hypot(state.player.x-state.boss.x, state.player.y-state.boss.y);
+      if(dist < 2.2) applyDamageToPlayer(state.boss.attack*0.8);
+      bp.aoeHit = true;
+      endBossPattern();
+    }
+  }
+}
+
+function getBossReward(stage){
+  return 30 + stage*5; // 스테이지1=35원, 10=80원, 30=180원
+}
+function onBossVictory(){
+  state.bossOutcome = 'win';
+  const reward = getBossReward(state.stage);
+  addMoney(reward);
+  const msg = document.getElementById('bossStatusMsg');
+  msg.textContent = '🏆 승리! 💰 +'+reward+'원';
+  msg.style.color = '#34d399';
+  document.getElementById('bossExitTempBtn').style.display = 'none'; // 승리 후엔 임시버튼 대신 출구/상점 오브젝트로 진행
+}
+function onBossDefeat(){
+  state.bossOutcome = 'lose';
+  const msg2 = document.getElementById('bossStatusMsg');
+  msg2.textContent = '💀 패배...';
+  msg2.style.color = '#ff6b6b';
+}
+
+document.getElementById('game').addEventListener('click', (ev)=>{
+  if(state.scene !== 'boss' || !state.boss) return;
+  const gameCanvas = document.getElementById('game');
+  const rect = gameCanvas.getBoundingClientRect();
+  const cx = (ev.clientX-rect.left) * (gameCanvas.width/rect.width);
+  const cy = (ev.clientY-rect.top) * (gameCanvas.height/rect.height);
+
+  // 승리 후: 출구/상점 오브젝트 클릭 처리
+  if(state.bossOutcome === 'win'){
+    if(Math.hypot(cx-EXIT_OBJ.x, cy-EXIT_OBJ.y) <= EXIT_OBJ.r){
+      startStage(state.stage>=50 ? 1 : state.stage+1); // 출구 - 다음 스테이지로 진행 (scene/오버레이는 startStage가 정리)
+    } else if(Math.hypot(cx-SHOP_OBJ.x, cy-SHOP_OBJ.y) <= SHOP_OBJ.r){
+      openShop();
+    }
+    return;
+  }
+  if(state.bossOutcome) return; // 패배 등 그 외 상태에서는 전투 입력 무시
+
+  if(Math.hypot(cx-(bossScreenX(state.boss.x)+BOSS_TILE/2), cy-(bossScreenY(state.boss.y)+BOSS_TILE/2)) > BOSS_HIT_RADIUS) return;
+  const now = performance.now();
+  if(now - state.lastPlayerHit < getPlayerAttackCooldown()) return;
+  // 사정거리 체크: 마우스로 보스를 조준했어도, 실제 거리가 장착 무기의 range 밖이면 공격 무효
+  const distToBoss = Math.hypot(state.player.x-state.boss.x, state.player.y-state.boss.y);
+  const atk = calcAttack(distToBoss); // 직업별 판정(고정 데미지 / 거리 감쇠)
+  if(!atk.hit){
+    state.rangeMissFlashUntil = now + 250; // 사정거리 밖 클릭 피드백(테두리 붉게 깜빡)
+    return;
+  }
+  state.lastPlayerHit = now;
+  state.boss.hp -= atk.damage;
+  state.bossHitFlashUntil = now + 200;
+  updateBossUI();
+  if(state.boss.hp <= 0){
+    state.boss.hp = 0;
+    onBossVictory();
+  }
+});
+
+/* ============================================================
+   5. 퀴즈
+   ============================================================ */
+function openQuiz(room){
+  state.quizActive = {room};
+  const cfg = state.stageData.cfg;
+  let a = 1+((Math.random()*cfg.quizMaxOperand)|0);
+  let b = 1+((Math.random()*cfg.quizMaxOperand)|0);
+  let op = ['+','-'][((Math.random()*2)|0)];
+  if(cfg.quizUseMulDiv && Math.random()<0.4){
+    op = Math.random()<0.5 ? '×' : '÷';
+    if(op==='×'){ a = 1+((Math.random()*12)|0); b = 1+((Math.random()*12)|0); }
+    if(op==='÷'){ b = 1+((Math.random()*9)|0); a = b*(1+((Math.random()*9)|0)); }
+  }
+  if(op==='-' && a<b) [a,b]=[b,a];
+  let answer;
+  if(op==='+') answer=a+b; else if(op==='-') answer=a-b; else if(op==='×') answer=a*b; else answer=a/b;
+  state.quizActive.answer = answer;
+  document.getElementById('quizQ').textContent = `${a} ${op} ${b} = ?`;
+  document.getElementById('quizMsg').textContent = '';
+  document.getElementById('quizInput').value = '';
+  document.getElementById('quizOverlay').classList.add('show');
+  document.getElementById('quizInput').focus();
+}
+
+document.getElementById('quizSubmit').onclick = submitQuiz;
+document.getElementById('quizInput').addEventListener('keydown', e=>{ if(e.key==='Enter') submitQuiz(); });
+
+function submitQuiz(){
+  if(!state.quizActive) return;
+  const val = Number(document.getElementById('quizInput').value);
+  const room = state.quizActive.room;
+  room.quizDone = true;
+  if(val === state.quizActive.answer){
+    const types = ['speed','vision','shield'];
+    const t = types[(Math.random()*3)|0];
+    state.bonus[t]++;
+    document.getElementById('quizMsg').textContent = '정답! 보상 아이템 획득';
+    updateHUD();
+  } else {
+    document.getElementById('quizMsg').textContent = `오답 (정답: ${state.quizActive.answer})`;
+  }
+  setTimeout(()=>{
+    document.getElementById('quizOverlay').classList.remove('show');
+    state.quizActive = null;
+  }, 700);
+}
+
+/* ============================================================
+   6. 업데이트 루프
+   ============================================================ */
+function updatePlayer(dt){
+  if(state.quizActive) return;
+  let dx=0, dy=0;
+  if(state.keys['w']||state.keys['arrowup']) dy -= 1;
+  if(state.keys['s']||state.keys['arrowdown']) dy += 1;
+  if(state.keys['a']||state.keys['arrowleft']) dx -= 1;
+  if(state.keys['d']||state.keys['arrowright']) dx += 1;
+  if(dx||dy){
+    const len = Math.hypot(dx,dy); dx/=len; dy/=len;
+    state.player.facing = [dx,dy];
+    let speed = state.player.speed;
+    if(performance.now() < state.speedBoostUntil) speed *= 1.5; // 3초간 기본속도의 1.5배
+    tryMove(state.player, dx*speed*dt, dy*speed*dt);
+  }
+  // 아이템(코인) 자동 획득 (방 안 + 복도 전체에 퍼져있는 전역 아이템 목록에서 체크)
+  const sd = state.stageData;
+  const px = Math.floor(state.player.x), py = Math.floor(state.player.y);
+  for(const it of sd.items){
+    if(!it.taken && it.pos[0]===px && it.pos[1]===py){
+      it.taken = true;
+      state.itemsCollected++;
+      addMoney(5); // 코인 1개 = 5원
+      updateHUD();
+      if(state.itemsCollected >= state.itemsRequired){
+        state.exitActive = true;
+      }
+      break;
+    }
+  }
+  // 포탈이 있는 방 진입 시 노출만 함 - 실제 진입(보스전)은 E 상호작용으로만(getInteractionTarget/tryInteract)
+  const room = whichRoom(sd, px, py);
+  if(room && room.isExit && state.exitActive){
+    state.exitRevealed = true;
+  }
+
+  // 포탈까지 가는 점선 가이드 경로 - 일정 주기로만 재계산(매 프레임 재계산 방지)
+  if(state.exitActive){
+    state.guideAcc += dt;
+    if(state.guideAcc >= 0.3){
+      state.guideAcc = 0;
+      const exitRoom = sd.rooms.find(r => r.isExit);
+      state.guidePath = exitRoom ? bfsPath(sd, px, py, exitRoom.center[0], exitRoom.center[1]) : null;
+    }
+  } else if(state.guidePath){
+    state.guidePath = null;
+  }
+
+  // 붙잡힘 체크 (방패로 막은 직후 무적시간 동안은 재판정 안 함)
+  const d = Math.hypot(state.player.x-state.enemy.x, state.player.y-state.enemy.y);
+  if(d < 0.55 && performance.now() >= state.shieldInvulnUntil) onCaught();
+}
+
+function tryMove(entity, dx, dy){
+  const sd = state.stageData;
+  const r = 0.3; // 충돌 반경
+  // X축
+  let nx = entity.x + dx;
+  if(!collideAt(sd, nx + Math.sign(dx)*r, entity.y - r) && !collideAt(sd, nx + Math.sign(dx)*r, entity.y + r)){
+    entity.x = nx;
+  }
+  // Y축
+  let ny = entity.y + dy;
+  if(!collideAt(sd, entity.x - r, ny + Math.sign(dy)*r) && !collideAt(sd, entity.x + r, ny + Math.sign(dy)*r)){
+    entity.y = ny;
+  }
+}
+function collideAt(sd, x, y){
+  return isBlockedTile(sd, Math.floor(x), Math.floor(y));
+}
+
+// --- 보스전 전용 아레나 맵 (스테이지 맵과 완전히 별개, 고정 크기) ---
+const BOSS_ARENA_W = 20, BOSS_ARENA_H = 14, BOSS_TILE = 32;
+const BOSS_OFFSET_X = (CANVAS_W - BOSS_ARENA_W*BOSS_TILE)/2;
+const BOSS_OFFSET_Y = (CANVAS_H - BOSS_ARENA_H*BOSS_TILE)/2;
+function bossScreenX(tx){ return BOSS_OFFSET_X + tx*BOSS_TILE; }
+function bossScreenY(ty){ return BOSS_OFFSET_Y + ty*BOSS_TILE; }
+
+function generateBossArena(){
+  const map = Array.from({length:BOSS_ARENA_H}, ()=> new Array(BOSS_ARENA_W).fill(T_FLOOR));
+  for(let x=0;x<BOSS_ARENA_W;x++){ map[0][x]=T_WALL; map[BOSS_ARENA_H-1][x]=T_WALL; }
+  for(let y=0;y<BOSS_ARENA_H;y++){ map[y][0]=T_WALL; map[y][BOSS_ARENA_W-1]=T_WALL; }
+  // 확장 지점: 여기에 스테이지별로 기둥/장애물(map[y][x]=T_WALL)을 몇 개 더 심으면
+  // 지형 요소가 있는 아레나가 됨 (지금은 거의 빈 공간 요구사항대로 테두리만)
+  return {map, W:BOSS_ARENA_W, H:BOSS_ARENA_H};
+}
+
+// tryMove/collideAt과 동일한 방식(반경 0.3, X/Y축 분리 체크)을 보스 아레나 맵 대상으로 복제
+function bossIsBlocked(x,y){
+  const arena = state.bossArena;
+  if(x<0||y<0||x>=arena.W||y>=arena.H) return true;
+  return arena.map[Math.floor(y)][Math.floor(x)] === T_WALL;
+}
+function bossTryMove(entity, dx, dy){
+  const r = 0.3;
+  let nx = entity.x + dx;
+  if(!bossIsBlocked(nx+Math.sign(dx)*r, entity.y-r) && !bossIsBlocked(nx+Math.sign(dx)*r, entity.y+r)) entity.x = nx;
+  let ny = entity.y + dy;
+  if(!bossIsBlocked(entity.x-r, ny+Math.sign(dy)*r) && !bossIsBlocked(entity.x+r, ny+Math.sign(dy)*r)) entity.y = ny;
+}
+function updateBossPlayerMovement(dt){
+  let dx=0, dy=0;
+  if(state.keys['w']||state.keys['arrowup']) dy -= 1;
+  if(state.keys['s']||state.keys['arrowdown']) dy += 1;
+  if(state.keys['a']||state.keys['arrowleft']) dx -= 1;
+  if(state.keys['d']||state.keys['arrowright']) dx += 1;
+  if(dx||dy){
+    const len = Math.hypot(dx,dy); dx/=len; dy/=len;
+    state.player.facing = [dx,dy];
+    bossTryMove(state.player, dx*state.player.speed*dt, dy*state.player.speed*dt);
+  }
+}
+
+function updateEnemy(dt){
+  // 확장 지점: 지금은 state.enemy 단일 객체 + 이 함수 하나가 그 개체만 전담하는 구조.
+  // 나중에 보스/여러 개체를 추가하려면 state.enemy를 state.enemies 배열로 바꾸고
+  // 이 함수를 (enemy) => {...} 형태로 감싸서 배열 각 원소에 대해 호출 + enemy.type별로
+  // 이동속도/감지반경/특수패턴을 분기하는 방식으로 확장하면 된다. (지금은 미적용)
+  const sd = state.stageData;
+  const e = state.enemy;
+
+  const ex = Math.floor(e.x), ey = Math.floor(e.y);
+  const px = Math.floor(state.player.x), py = Math.floor(state.player.y);
+  const blinded = performance.now() < e.blindUntil;
+
+  // --- 인식(감지) 판정은 일정 주기로만 재계산 (매 프레임 X) ---
+  state.thinkAcc += dt;
+  if(state.thinkAcc >= 0.25){
+    state.thinkAcc = 0;
+
+    // 인식 판정: 유클리드 거리 기준의 단일 반경(range) 체크로 명확히 구성
+    // - 개체-플레이어 거리가 DETECTION_RADIUS 이하 + 그 사이에 벽/닫힌문이 없어야(hasLineOfSight) 인식 성공
+    // - 시야차단 상태(blinded)면 이 판정 자체를 건너뛰고 바로 인식 실패 처리
+    let canSee = false;
+    if(!blinded){
+      const dist = Math.hypot(state.player.x-e.x, state.player.y-e.y);
+      if(dist <= sd.cfg.detectionRadius && hasLineOfSight(sd, ex,ey, px,py)){
+        canSee = true;
+      }
+    }
+
+    if(blinded){
+      // 시야차단 중에는 이미 추격 중이었더라도 유예 없이 즉시 추격 해제
+      if(e.mode === 'chase'){ e.mode = 'patrol'; e.path = null; }
+    } else if(canSee){
+      e.mode = 'chase';
+      const path = bfsPath(sd, ex,ey, px,py);
+      if(path){ e.path = path; e.pathIdx = 1; } else { e.mode = 'patrol'; e.path = null; }
+    } else if(e.mode === 'chase'){
+      // 한 번 인식하면 시야에서 벗어나도 추적을 유지한다 - 방에 들어가 문을 닫아
+      // bfsPath가 도달 불가(null)를 반환할 때만(=닫힌 문에 막힘) 추적이 풀린다
+      const path = bfsPath(sd, ex,ey, px,py);
+      if(path){ e.path = path; e.pathIdx = 1; } else { e.mode = 'patrol'; e.path = null; }
+    } else {
+      if(!e.path || e.pathIdx >= e.path.length){
+        // 복도 위주로 배회하되, 열려 있는 문이 있으면 그쪽으로 끌리듯 순찰하도록 유도
+        let target = null;
+        const openDoorCoords = Object.keys(sd.doors)
+          .filter(k => sd.doors[k].open)
+          .map(k => k.split(',').map(Number));
+        if(openDoorCoords.length > 0 && Math.random() < 0.6){
+          const [dx,dy] = openDoorCoords[(Math.random()*openDoorCoords.length)|0];
+          const dirs=[[0,-1],[0,1],[-1,0],[1,0]];
+          for(const [ox,oy] of dirs){
+            const nx=dx+ox, ny=dy+oy;
+            if(sd.map[ny]?.[nx]===T_FLOOR){ target=[nx,ny]; break; }
+          }
+        }
+        if(!target){
+          let tries = 0;
+          while(tries++ < 30){
+            const rx = 1+((Math.random()*(sd.W-2))|0), ry = 1+((Math.random()*(sd.H-2))|0);
+            if(sd.map[ry][rx] === T_FLOOR){ target = [rx,ry]; break; }
+          }
+        }
+        if(target){
+          const path = bfsPath(sd, ex,ey, target[0],target[1]);
+          if(path){ e.path = path; e.pathIdx = 1; }
+        }
+      }
+    }
+  }
+
+  // --- 경로를 따라 이동 (타일 기반: 벽에 걸려 비비는 현상 방지) ---
+  const speed = sd.cfg.enemySpeed;
+  if(e.path && e.pathIdx < e.path.length){
+    const [tx,ty] = e.path[e.pathIdx];
+    const targetX = tx+0.5, targetY = ty+0.5;
+    const dx = targetX-e.x, dy = targetY-e.y;
+    const d = Math.hypot(dx,dy);
+    if(d > 0.01) e.facing = [dx/d, dy/d]; // 렌더링용 방향값(캐릭터가 바라보는 쪽 표시) - 이동/충돌 로직과 무관
+    const step = speed*dt;
+    if(d <= step){
+      e.x = targetX; e.y = targetY; e.pathIdx++;
+    } else {
+      e.x += dx/d*step; e.y += dy/d*step;
+    }
+  }
+}
+
+function onCaught(){
+  if(state.bonus.shield>0){
+    state.bonus.shield--;
+    updateHUD();
+    // 위치는 그대로 유지, 공격 1회만 무효화 + 잠깐 무적(재판정 방지) 프레임 부여
+    state.shieldInvulnUntil = performance.now() + 800;
+    state.enemy.lostTimer = 0; // 다시 눈치채는 데 약간의 여유
+    return;
+  }
+  state.running = false;
+  document.getElementById('gameoverOverlay').classList.add('show');
+}
+
+function clearStage(){
+  state.running = false;
+  document.getElementById('clearText').textContent =
+    state.stage>=50 ? '50단계를 모두 클리어했습니다! 축하합니다 🎉' : `${state.stage+1}단계로 이동합니다.`;
+  document.getElementById('nextStageBtn').textContent = state.stage>=50 ? '처음부터 다시' : '다음 스테이지';
+  document.getElementById('clearOverlay').classList.add('show');
+}
+
+document.getElementById('restartStageBtn').onclick = ()=> startStage(state.stage);
+document.getElementById('restartAllBtn').onclick = ()=> { state.bonus={speed:0,vision:0,shield:0}; state.player.money=0; startStage(1); };
+document.getElementById('nextStageBtn').onclick = ()=> startStage(state.stage>=50 ? 1 : state.stage+1);
+document.getElementById('bossExitTempBtn').onclick = ()=> exitBossScene(); // 임시 - 4~5단계에서 실제 보스전 종료 흐름으로 교체 예정
+document.getElementById('shopCloseBtn').onclick = ()=> closeShop();
+
+/* ============================================================
+   7. 렌더링
+   ============================================================ */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// --- 렌더링 전용 색상 캐시 (로직과 무관, 시각 효과만 담당) ---
+// CSS 변수 조회는 값이 바뀌지 않으므로 매 프레임이 아니라 최초 1회만 수행해서 캐싱한다.
+let __paletteCache = null;
+function shadeColor(hex, percent){
+  hex = hex.replace('#','').trim();
+  if(hex.length===3) hex = hex.split('').map(c=>c+c).join('');
+  const num = parseInt(hex,16);
+  const amt = Math.round(255*percent/100);
+  let r = ((num>>16)&0xff)+amt, g = ((num>>8)&0xff)+amt, b = (num&0xff)+amt;
+  r=Math.max(0,Math.min(255,r)); g=Math.max(0,Math.min(255,g)); b=Math.max(0,Math.min(255,b));
+  return `rgb(${r},${g},${b})`;
+}
+function getPalette(){
+  if(__paletteCache) return __paletteCache;
+  const cs = getComputedStyle(document.documentElement);
+  const wall = cs.getPropertyValue('--wall').trim();
+  const floor = cs.getPropertyValue('--floor').trim();
+  const room = cs.getPropertyValue('--room').trim();
+  const doorOpen = cs.getPropertyValue('--door-open').trim();
+  const doorClosed = cs.getPropertyValue('--door-closed').trim();
+  __paletteCache = {
+    wall, floor, room, doorOpen, doorClosed,
+    wallLight: shadeColor(wall, 30),
+    wallDark: shadeColor(wall, -36),
+    roomHighlight: shadeColor(room, 14),
+    doorOpenLight: shadeColor(doorOpen, 24),
+    doorClosedDark: shadeColor(doorClosed, -28),
+    // 참고 이미지의 이끼 낀 돌바닥 느낌을 흉내내기 위한 텍스처용 색
+    wallFleckDark: 'rgba(0,0,0,.2)',
+    wallFleckLight: 'rgba(255,255,255,.08)',
+    floorSeam: 'rgba(0,0,0,.25)',
+    mossFleck: 'rgba(94,140,70,.32)',
+    roomFleckDark: 'rgba(0,0,0,.14)'
+  };
+  return __paletteCache;
+}
+// 타일 좌표 기반 고정 의사난수(매 프레임 값이 바뀌지 않아 텍스처가 떨리지 않음)
+function tileHash(x,y){
+  let h = (x*374761393 + y*668265263) | 0;
+  h = Math.imul(h ^ (h>>>13), 1274126177);
+  h = (h ^ (h>>>16)) >>> 0;
+  return h / 4294967296;
+}
+
+// --- 보스전 화면 렌더링 (스테이지 화면과 완전히 분리된 별도 씬) ---
+function renderBossScene(){
+  updateBossUI();
+  ctx.fillStyle = '#0d0709';
+  ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+
+  // 아레나 타일 그리기 (스테이지 맵과 완전히 별개의 고정 크기 맵)
+  const arena = state.bossArena;
+  for(let y=0;y<arena.H;y++){
+    for(let x=0;x<arena.W;x++){
+      const px = bossScreenX(x), py = bossScreenY(y);
+      if(arena.map[y][x] === T_WALL){
+        ctx.fillStyle = '#2a1620'; ctx.fillRect(px,py,BOSS_TILE,BOSS_TILE);
+        ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(px,py,BOSS_TILE,4); ctx.fillRect(px,py,4,BOSS_TILE);
+        ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(px,py+BOSS_TILE-4,BOSS_TILE,4); ctx.fillRect(px+BOSS_TILE-4,py,4,BOSS_TILE);
+      } else {
+        ctx.fillStyle = (x+y)%2===0 ? '#241522' : '#2a1826';
+        ctx.fillRect(px,py,BOSS_TILE,BOSS_TILE);
+      }
+    }
+  }
+
+  const bossHit = performance.now() < state.bossHitFlashUntil;
+  drawBossPlaceholder(ctx, bossScreenX(state.boss.x)+BOSS_TILE/2, bossScreenY(state.boss.y)+BOSS_TILE/2, 26, bossHit, state.boss.facing);
+  drawWarrior(ctx, bossScreenX(state.player.x)+BOSS_TILE/2, bossScreenY(state.player.y)+BOSS_TILE/2, 18, state.player.facing);
+  // 무기 레이어: 보스전에서만 그림 (스테이지 추격 파트의 drawWarrior 호출에는 붙이지 않음)
+  drawWeaponLayer(ctx, bossScreenX(state.player.x)+BOSS_TILE/2, bossScreenY(state.player.y)+BOSS_TILE/2, 18, state.player.facing, getEquippedWeaponVisual());
+
+  // 현재 장착 무기의 사정거리를 플레이어 주위에 옅은 원으로 표시
+  if(getPlayerAttackRange() !== null){ // 마법사처럼 사정거리 제한이 없으면 원 표시 안 함
+    const ppx = bossScreenX(state.player.x)+BOSS_TILE/2, ppy = bossScreenY(state.player.y)+BOSS_TILE/2;
+    const rangePx = getPlayerAttackRange()*BOSS_TILE;
+    const rangeMiss = performance.now() < state.rangeMissFlashUntil;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(ppx, ppy, rangePx, 0, Math.PI*2);
+    ctx.strokeStyle = rangeMiss ? 'rgba(255,90,90,.7)' : 'rgba(140,200,255,.25)';
+    ctx.lineWidth = rangeMiss ? 2.5 : 1.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 공격 패턴 텔레그래프(예고) 표시
+  const bp = state.bossPattern;
+  if(bp && bp.active){
+    const bx = bossScreenX(state.boss.x)+BOSS_TILE/2, by = bossScreenY(state.boss.y)+BOSS_TILE/2;
+    if(bp.active === 'dash' && bp.phase === 'telegraph'){
+      const px = bossScreenX(state.player.x)+BOSS_TILE/2, py = bossScreenY(state.player.y)+BOSS_TILE/2;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,90,90,.65)'; ctx.lineWidth = 3; ctx.setLineDash([7,7]);
+      ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(px,py); ctx.stroke();
+      ctx.restore();
+    } else if(bp.active === 'aoe'){
+      ctx.save();
+      ctx.beginPath(); ctx.arc(bx,by, 2.2*BOSS_TILE, 0, Math.PI*2);
+      ctx.strokeStyle = 'rgba(255,150,60,.6)'; ctx.lineWidth = 3; ctx.stroke();
+      ctx.restore();
+    } else if(bp.active === 'projectile'){
+      ctx.save();
+      ctx.beginPath(); ctx.arc(bx,by, 16, 0, Math.PI*2);
+      ctx.strokeStyle = 'rgba(255,90,90,.55)'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // 투사체
+  state.projectiles.forEach(proj=>{
+    const px = bossScreenX(proj.x)+BOSS_TILE/2, py = bossScreenY(proj.y)+BOSS_TILE/2;
+    ctx.save();
+    ctx.shadowColor = 'rgba(255,80,80,.9)'; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.arc(px,py,6,0,Math.PI*2);
+    ctx.fillStyle = '#ff5d5d'; ctx.fill();
+    ctx.restore();
+  });
+
+  if(state.bossOutcome === 'win'){
+    drawExitObject(EXIT_OBJ.x, EXIT_OBJ.y, EXIT_OBJ.r);
+    drawShopObject(SHOP_OBJ.x, SHOP_OBJ.y, SHOP_OBJ.r);
+  }
+
+  // 플레이어 피격 시 화면 전체에 살짝 붉은 플래시
+  if(performance.now() < state.playerHitFlashUntil){
+    ctx.fillStyle = 'rgba(255,40,40,.22)';
+    ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+  }
+}
+
+// 예비용 보스 그래픽 1종(추후 교체 예정) - 후드 로브 실루엣 + 발광하는 눈
+function drawBossPlaceholder(ctx2, px, py, r, hit, facing){
+  ctx2.save();
+  ctx2.translate(px, py);
+  if(facing && facing[0] < -0.15) ctx2.scale(-1,1);
+
+  // 그림자
+  ctx2.beginPath(); ctx2.ellipse(0, r*0.95, r*0.85, r*0.25, 0, 0, Math.PI*2);
+  ctx2.fillStyle = 'rgba(0,0,0,.35)'; ctx2.fill();
+
+  // 로브(몸통) - 아래로 갈수록 넓어지는 실루엣
+  ctx2.beginPath();
+  ctx2.moveTo(-r*0.15, -r*0.9);
+  ctx2.quadraticCurveTo(-r*0.9, -r*0.2, -r*0.95, r*0.85);
+  ctx2.lineTo(r*0.95, r*0.85);
+  ctx2.quadraticCurveTo(r*0.9, -r*0.2, r*0.15, -r*0.9);
+  ctx2.closePath();
+  ctx2.fillStyle = hit ? '#4a1f1f' : '#241522'; ctx2.fill();
+  // 로브 입체감
+  ctx2.beginPath(); ctx2.ellipse(-r*0.3,-r*0.1, r*0.35, r*0.5, -0.2, 0, Math.PI*2);
+  ctx2.fillStyle = 'rgba(255,255,255,.05)'; ctx2.fill();
+  ctx2.beginPath(); ctx2.ellipse(r*0.35, r*0.3, r*0.4, r*0.55, 0.2, 0, Math.PI*2);
+  ctx2.fillStyle = 'rgba(0,0,0,.3)'; ctx2.fill();
+
+  // 뿔
+  ctx2.fillStyle = '#3a2438';
+  ctx2.beginPath(); ctx2.moveTo(-r*0.25,-r*0.85); ctx2.lineTo(-r*0.5,-r*1.4); ctx2.lineTo(-r*0.08,-r*0.95); ctx2.closePath(); ctx2.fill();
+  ctx2.beginPath(); ctx2.moveTo(r*0.25,-r*0.85); ctx2.lineTo(r*0.5,-r*1.4); ctx2.lineTo(r*0.08,-r*0.95); ctx2.closePath(); ctx2.fill();
+
+  // 후드 안쪽 어둠 + 발광하는 눈
+  ctx2.beginPath(); ctx2.ellipse(0,-r*0.55, r*0.42, r*0.4, 0, 0, Math.PI*2);
+  ctx2.fillStyle = '#0a0508'; ctx2.fill();
+  const glow = 0.6 + 0.4*Math.sin(performance.now()/260);
+  ctx2.shadowColor = `rgba(255,60,60,${glow})`; ctx2.shadowBlur = r*0.4;
+  ctx2.fillStyle = `rgba(255,${60+glow*40},${60+glow*40},1)`;
+  ctx2.beginPath(); ctx2.ellipse(-r*0.15,-r*0.55, r*0.09, r*0.05, 0, 0, Math.PI*2); ctx2.fill();
+  ctx2.beginPath(); ctx2.ellipse(r*0.15,-r*0.55, r*0.09, r*0.05, 0, 0, Math.PI*2); ctx2.fill();
+  ctx2.shadowBlur = 0;
+
+  ctx2.restore();
+}
+
+// 승리 후 등장하는 출구/상점 오브젝트 (둘 다 클릭으로 상호작용)
+function drawExitObject(x,y,r){
+  const pulse = 0.6 + 0.4*Math.sin(performance.now()/220);
+  ctx.save();
+  ctx.shadowColor = `rgba(80,230,140,${pulse})`; ctx.shadowBlur = r*0.5;
+  ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
+  ctx.fillStyle = '#1c3a2a'; ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#34d399'; ctx.lineWidth = 3; ctx.stroke();
+  ctx.fillStyle = '#34d399'; ctx.font = 'bold '+(r*0.9)+'px sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('➜', x, y);
+  ctx.fillStyle = '#cfe8da'; ctx.font = (r*0.42)+'px sans-serif';
+  ctx.fillText('출구', x, y+r*1.5);
+  ctx.restore();
+}
+function drawShopObject(x,y,r){
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
+  ctx.fillStyle = '#3a2f1c'; ctx.fill();
+  ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3; ctx.stroke();
+  ctx.fillStyle = '#ffd166'; ctx.font = 'bold '+(r*0.9)+'px sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('🛒', x, y);
+  ctx.fillStyle = '#f0dfb0'; ctx.font = (r*0.42)+'px sans-serif';
+  ctx.fillText('상점', x, y+r*1.5);
+  ctx.restore();
+}
+
+function render(){
+  updateBonusUI();
+  if(!state.stageData){ ctx.fillStyle='#000'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); return; } // 직업 선택 전(스테이지 미시작)
+  if(state.scene === 'boss'){ renderBossScene(); return; }
+  const sd = state.stageData;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+
+  const camX = state.player.x*TILE - CANVAS_W/2;
+  const camY = state.player.y*TILE - CANVAS_H/2;
+
+  ctx.save();
+  ctx.translate(-camX, -camY);
+
+  const x0 = Math.floor(camX/TILE)-1, x1 = Math.ceil((camX+CANVAS_W)/TILE)+1;
+  const y0 = Math.floor(camY/TILE)-1, y1 = Math.ceil((camY+CANVAS_H)/TILE)+1;
+
+  const pal = getPalette();
+  const bevel = Math.max(2, TILE*0.14);
+
+  for(let y=Math.max(0,y0); y<Math.min(sd.H,y1); y++){
+    for(let x=Math.max(0,x0); x<Math.min(sd.W,x1); x++){
+      const t = sd.map[y][x];
+      const px = x*TILE, py = y*TILE;
+
+      if(t===T_WALL){
+        ctx.fillStyle = pal.wall;
+        ctx.fillRect(px, py, TILE, TILE);
+        // 돌 블록 얼룩(텍스처) - 타일 좌표 기반이라 고정돼 있고 매 프레임 재계산 안 함
+        const wn = tileHash(x, y);
+        if(wn > 0.33){
+          ctx.fillStyle = wn > 0.66 ? pal.wallFleckDark : pal.wallFleckLight;
+          ctx.fillRect(px+TILE*0.12, py+TILE*0.12, TILE*0.45, TILE*0.4);
+        }
+        // 베벨(입체) 효과: 위/왼쪽은 밝게, 아래/오른쪽은 어둡게 - 튀어나온 블록처럼 보이게
+        ctx.fillStyle = pal.wallLight;
+        ctx.fillRect(px, py, TILE, bevel);
+        ctx.fillRect(px, py, bevel, TILE);
+        ctx.fillStyle = pal.wallDark;
+        ctx.fillRect(px, py+TILE-bevel, TILE, bevel);
+        ctx.fillRect(px+TILE-bevel, py, bevel, TILE);
+      } else if(t===T_FLOOR){
+        ctx.fillStyle = pal.floor;
+        ctx.fillRect(px, py, TILE, TILE);
+        // 돌바닥 슬랩 이음새
+        ctx.strokeStyle = pal.floorSeam; ctx.lineWidth = 1;
+        ctx.strokeRect(px+0.5, py+0.5, TILE-1, TILE-1);
+        // 이끼 얼룩(고정 위치)
+        if(tileHash(x*3+1, y*5+2) > 0.7){
+          const ox = tileHash(x,y)*TILE*0.5 + TILE*0.2;
+          const oy = tileHash(y,x)*TILE*0.5 + TILE*0.2;
+          ctx.fillStyle = pal.mossFleck;
+          ctx.beginPath(); ctx.ellipse(px+ox, py+oy, TILE*0.14, TILE*0.09, 0, 0, Math.PI*2); ctx.fill();
+        }
+        // 위쪽이 벽이면 그 벽이 드리우는 그림자를 바닥에 얹어 입체감을 더함
+        if(sd.map[y-1]?.[x] === T_WALL){
+          ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.fillRect(px, py, TILE, TILE*0.22);
+          ctx.fillStyle = 'rgba(0,0,0,.12)'; ctx.fillRect(px, py+TILE*0.22, TILE, TILE*0.16);
+        }
+      } else if(t===T_ROOM){
+        ctx.fillStyle = pal.room;
+        ctx.fillRect(px, py, TILE, TILE);
+        // 복도와 톤 차이가 나도록 안쪽에 옅은 하이라이트 테두리만 한 줄 추가
+        ctx.strokeStyle = pal.roomHighlight;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(px+1.5, py+1.5, TILE-3, TILE-3);
+        // 바닥 얼룩(텍스처)
+        if(tileHash(x*5+2, y*7+1) > 0.6){
+          ctx.fillStyle = pal.roomFleckDark;
+          ctx.fillRect(px+TILE*0.15, py+TILE*0.55, TILE*0.5, TILE*0.25);
+        }
+        // 위쪽이 벽이면 그 벽이 드리우는 그림자를 바닥에 얹어 입체감을 더함
+        if(sd.map[y-1]?.[x] === T_WALL){
+          ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.fillRect(px, py, TILE, TILE*0.22);
+          ctx.fillStyle = 'rgba(0,0,0,.12)'; ctx.fillRect(px, py+TILE*0.22, TILE, TILE*0.16);
+        }
+      } else if(t===T_DOOR){
+        const d = sd.doors[x+","+y];
+        if(d.open){
+          ctx.fillStyle = pal.doorOpen;
+          ctx.fillRect(px, py, TILE, TILE);
+          // 열림: 안쪽이 비치는 느낌으로 중앙에 더 밝은 사각형
+          ctx.fillStyle = pal.doorOpenLight;
+          const inset = TILE*0.22;
+          ctx.fillRect(px+inset, py+inset, TILE-inset*2, TILE-inset*2);
+        } else {
+          ctx.fillStyle = pal.doorClosed;
+          ctx.fillRect(px, py, TILE, TILE);
+          // 닫힘: 두꺼운 어두운 테두리 + 나무 판자 느낌의 가로줄 2개로 확실히 구분
+          ctx.strokeStyle = pal.doorClosedDark;
+          ctx.lineWidth = 3;
+          ctx.strokeRect(px+2, py+2, TILE-4, TILE-4);
+          ctx.fillStyle = pal.doorClosedDark;
+          ctx.fillRect(px+3, py+TILE*0.33, TILE-6, 2);
+          ctx.fillRect(px+3, py+TILE*0.66, TILE-6, 2);
+        }
+      }
+    }
+  }
+
+  // 포탈까지 가는 점선 가이드라인 (모든 코인 획득 후부터 항상 표시, 플레이어 이동에 따라 갱신)
+  if(state.guidePath && state.guidePath.length > 1){
+    ctx.save();
+    ctx.strokeStyle = 'rgba(120,200,255,.75)';
+    ctx.lineWidth = Math.max(2, TILE*0.09);
+    ctx.lineCap = 'round';
+    ctx.setLineDash([TILE*0.18, TILE*0.16]);
+    ctx.lineDashOffset = -(performance.now()/60) % (TILE*0.34); // 흐르는 느낌의 애니메이션
+    ctx.beginPath();
+    state.guidePath.forEach(([gx,gy], i)=>{
+      const cx = gx*TILE+TILE/2, cy = gy*TILE+TILE/2;
+      if(i===0) ctx.moveTo(cx,cy); else ctx.lineTo(cx,cy);
+    });
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 방 장식(상자/횃불) - 순수 시각 요소, 충돌 없음
+  for(const d of sd.decorations){
+    if(d.type === 'crate') drawCrate(d.pos[0], d.pos[1]);
+    else if(d.type === 'torch') drawTorch(d.pos[0], d.pos[1]);
+  }
+
+  // 아이템(복도+방 전체) / 퀴즈 / 탈출구
+  for(const it of sd.items){
+    if(!it.taken) drawCoin(it.pos[0], it.pos[1]);
+  }
+  for(const r of sd.rooms){
+    if(r.quizPos && !r.quizDone){
+      drawGlyph(r.quizPos[0], r.quizPos[1], '❓', '#8fd3ff');
+    }
+    if(r.isExit && state.exitRevealed){
+      drawPortal(r.center[0], r.center[1]);
+    }
+  }
+
+  // 상호작용 가능(문/퀴즈) 하이라이트 - E키로 실제 처리하는 판정 로직을 그대로 재사용
+  if(!state.quizActive){
+    const target = getInteractionTarget();
+    if(target){
+      const [tx,ty] = target.pos;
+      const pulse = 0.5 + 0.5*Math.sin(performance.now()/180);
+      ctx.save();
+      ctx.strokeStyle = `rgba(90,200,250,${0.5+0.5*pulse})`;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(tx*TILE+2, ty*TILE+2, TILE-4, TILE-4);
+      ctx.fillStyle = '#5ac8fa';
+      ctx.font = 'bold '+(TILE*0.55)+'px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillText('E', tx*TILE+TILE/2, ty*TILE-2);
+      ctx.restore();
+    }
+  }
+
+  // 적(고양이) - 시야차단 중이면 어두운 실루엣, 추적 중이면 눈이 붉게
+  // 확장 지점: state.enemy.type에 따라 여기서 drawCat 대신 drawBoss(가칭) 등으로 분기하면 됨
+  // (지금은 type이 'cat' 하나뿐이라 분기 없이 바로 그림)
+  const enemyBlinded = performance.now() < state.enemy.blindUntil;
+  drawCat(ctx, state.enemy.x*TILE, state.enemy.y*TILE, TILE*0.34, state.enemy.facing,
+          {chasing: state.enemy.mode==='chase', dark: enemyBlinded});
+  if(enemyBlinded){
+    ctx.save();
+    ctx.beginPath(); ctx.arc(state.enemy.x*TILE, state.enemy.y*TILE, TILE*0.38, 0, Math.PI*2);
+    ctx.strokeStyle = 'rgba(90,200,250,.6)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore();
+  }
+
+  // 속도증가 사용 중 - 플레이어 이동 반대 방향으로 잔상 파티클
+  if(performance.now() < state.speedBoostUntil){
+    const [fx,fy] = state.player.facing;
+    for(let i=1;i<=3;i++){
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(255,209,102,${0.35/i})`;
+      ctx.arc((state.player.x - fx*0.35*i)*TILE, (state.player.y - fy*0.35*i)*TILE, TILE*(0.28-i*0.05), 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  // 방패 보유 중 - 플레이어 주위를 도는 방패 이펙트
+  if(state.bonus.shield > 0){
+    const ang = performance.now()/300;
+    for(let i=0;i<3;i++){
+      const a = ang + i*(Math.PI*2/3);
+      const sx = state.player.x*TILE + Math.cos(a)*TILE*0.55;
+      const sy = state.player.y*TILE + Math.sin(a)*TILE*0.55;
+      ctx.beginPath();
+      ctx.fillStyle = '#34d399';
+      ctx.arc(sx, sy, TILE*0.09, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  // 플레이어(쥐)
+  drawWarrior(ctx, state.player.x*TILE, state.player.y*TILE, TILE*0.34, state.player.facing);
+
+  ctx.restore();
+
+  const danger = document.getElementById('danger');
+  danger.classList.toggle('show', state.enemy.mode==='chase');
+}
+
+function drawWarrior(ctx2, px, py, r, facing){
+  ctx2.save();
+  ctx2.translate(px, py);
+  if(facing && facing[0] < -0.15) ctx2.scale(-1,1);
+
+  // 그림자
+  ctx2.beginPath(); ctx2.ellipse(0, r*0.85, r*0.85, r*0.28, 0, 0, Math.PI*2);
+  ctx2.fillStyle = 'rgba(0,0,0,.3)'; ctx2.fill();
+
+  // 뒤로 흩날리는 망토
+  ctx2.beginPath();
+  ctx2.moveTo(-r*0.3, -r*0.25);
+  ctx2.quadraticCurveTo(-r*1.25, r*0.05, -r*0.85, r*0.85);
+  ctx2.quadraticCurveTo(-r*0.45, r*0.45, -r*0.2, r*0.15);
+  ctx2.closePath();
+  ctx2.fillStyle = 'rgba(35,20,20,.85)'; ctx2.fill();
+
+  // 다리/부츠
+  ctx2.fillStyle = '#3a2a22';
+  ctx2.fillRect(-r*0.4, r*0.35, r*0.32, r*0.55);
+  ctx2.fillRect(r*0.08, r*0.35, r*0.32, r*0.55);
+  ctx2.fillStyle = '#e7ddc9'; // 모피 장식 밑단
+  ctx2.fillRect(-r*0.4, r*0.32, r*0.32, r*0.1);
+  ctx2.fillRect(r*0.08, r*0.32, r*0.32, r*0.1);
+
+  // 몸통(갑옷)
+  ctx2.beginPath(); ctx2.ellipse(0, r*0.05, r*0.55, r*0.5, 0, 0, Math.PI*2);
+  ctx2.fillStyle = '#8a8f9c'; ctx2.fill();
+  // 갑옷 입체감: 하이라이트 + 그림자
+  ctx2.beginPath(); ctx2.ellipse(-r*0.18,-r*0.1, r*0.28, r*0.22, -0.3, 0, Math.PI*2);
+  ctx2.fillStyle = 'rgba(255,255,255,.3)'; ctx2.fill();
+  ctx2.beginPath(); ctx2.ellipse(r*0.2, r*0.22, r*0.3, r*0.24, 0.3, 0, Math.PI*2);
+  ctx2.fillStyle = 'rgba(0,0,0,.2)'; ctx2.fill();
+  // 가슴 벨트
+  ctx2.strokeStyle = '#4a3a2a'; ctx2.lineWidth = r*0.08;
+  ctx2.beginPath(); ctx2.moveTo(-r*0.4, r*0.1); ctx2.lineTo(r*0.4, r*0.1); ctx2.stroke();
+
+  // 모피 어깨 장식
+  ctx2.beginPath(); ctx2.ellipse(-r*0.48,-r*0.18, r*0.28, r*0.24, 0, 0, Math.PI*2);
+  ctx2.fillStyle = '#e7ddc9'; ctx2.fill();
+  ctx2.beginPath(); ctx2.ellipse(r*0.4,-r*0.15, r*0.2, r*0.2, 0, 0, Math.PI*2);
+  ctx2.fillStyle = '#8a8f9c'; ctx2.fill(); // 반대쪽 어깨 갑옷
+
+  // 머리(피부) + 붉은 머리카락
+  ctx2.beginPath(); ctx2.arc(r*0.02, -r*0.58, r*0.3, 0, Math.PI*2);
+  ctx2.fillStyle = '#d8a878'; ctx2.fill();
+  ctx2.beginPath();
+  ctx2.moveTo(-r*0.16,-r*0.85);
+  ctx2.quadraticCurveTo(r*0.05,-r*1.4, r*0.3,-r*0.82);
+  ctx2.quadraticCurveTo(r*0.08,-r*0.98, -r*0.06,-r*0.78);
+  ctx2.closePath();
+  ctx2.fillStyle = '#b32b2b'; ctx2.fill();
+
+  // 눈가 마스크 + 눈
+  ctx2.fillStyle = '#1a1a1a';
+  ctx2.fillRect(-r*0.14,-r*0.62, r*0.34, r*0.07);
+  ctx2.beginPath(); ctx2.arc(r*0.14,-r*0.58, r*0.035, 0, Math.PI*2);
+  ctx2.fillStyle = '#ffe27a'; ctx2.fill();
+
+  // 팔 (무기는 따로 붙일 예정이라 여기선 빈손으로만 표현)
+  ctx2.beginPath(); ctx2.ellipse(r*0.35, r*0.08, r*0.14, r*0.22, 0.3, 0, Math.PI*2);
+  ctx2.fillStyle = '#d8a878'; ctx2.fill();
+
+  ctx2.restore();
+}
+
+// 무기 레이어: drawWarrior와 같은 좌표계(중심 px,py / 반지름 r / 좌향 시 좌우반전)에서 손 위치(r*0.35, r*0.08)에 붙임
+// visual 종류별 그리기 함수는 WEAPON_DRAWERS에 등록 → 새 무기 모양은 여기에 한 줄 추가
+const WEAPON_DRAWERS = {
+  sword(c, r){
+    c.rotate(0.75);
+    c.fillStyle = '#6b4a2a'; c.fillRect(-r*0.05, -r*0.05, r*0.1, r*0.3);          // 손잡이
+    c.fillStyle = '#c9a23a'; c.fillRect(-r*0.2, -r*0.1, r*0.4, r*0.08);            // 가드
+    c.fillStyle = '#dfe6ee'; c.fillRect(-r*0.07, -r*0.85, r*0.14, r*0.75);         // 칼날
+    c.beginPath(); c.moveTo(-r*0.07,-r*0.85); c.lineTo(0,-r*1.0); c.lineTo(r*0.07,-r*0.85); c.closePath(); c.fill();
+  },
+  axe(c, r){
+    c.rotate(0.55);
+    c.fillStyle = '#6b4a2a'; c.fillRect(-r*0.05, -r*0.8, r*0.1, r*1.1);            // 자루
+    c.fillStyle = '#d5dde8'; c.strokeStyle = '#2b2f38'; c.lineWidth = r*0.05;
+    c.beginPath(); c.moveTo(r*0.05,-r*0.8); c.quadraticCurveTo(r*0.55,-r*0.75, r*0.4,-r*0.35);
+    c.lineTo(r*0.05,-r*0.4); c.closePath(); c.fill(); c.stroke();                   // 도끼날
+  },
+  bow(c, r){
+    c.rotate(-0.2);
+    c.strokeStyle = '#8a5a2a'; c.lineWidth = r*0.1;
+    c.beginPath(); c.arc(r*0.1, 0, r*0.8, -Math.PI*0.45, Math.PI*0.45); c.stroke(); // 활대
+    c.strokeStyle = 'rgba(240,240,240,.85)'; c.lineWidth = r*0.035;
+    const ex = r*0.1 + Math.cos(Math.PI*0.45)*r*0.8, ey = Math.sin(Math.PI*0.45)*r*0.8;
+    c.beginPath(); c.moveTo(ex,-ey); c.lineTo(ex,ey); c.stroke();                   // 활시위
+  },
+  rapier(c, r){
+    c.rotate(0.75);
+    c.fillStyle = '#6b4a2a'; c.fillRect(-r*0.04, -r*0.02, r*0.08, r*0.26);
+    c.strokeStyle = '#c9a23a'; c.lineWidth = r*0.06;
+    c.beginPath(); c.arc(0, -r*0.05, r*0.16, Math.PI, 0); c.stroke();             // 컵 모양 가드
+    c.fillStyle = '#eaf2ff'; c.fillRect(-r*0.03, -r*1.15, r*0.06, r*1.1);          // 가늘고 긴 칼날
+  },
+  longbow(c, r){
+    c.rotate(-0.2); c.scale(1.2, 1.2);
+    c.strokeStyle = '#5a3a1a'; c.lineWidth = r*0.12;
+    c.beginPath(); c.arc(r*0.1, 0, r*0.8, -Math.PI*0.45, Math.PI*0.45); c.stroke();
+    c.strokeStyle = '#d4a23a'; c.lineWidth = r*0.04;                                // 금장 포인트
+    c.beginPath(); c.arc(r*0.1, 0, r*0.8, -Math.PI*0.1, Math.PI*0.1); c.stroke();
+    c.strokeStyle = 'rgba(240,240,240,.85)'; c.lineWidth = r*0.035;
+    const ex = r*0.1 + Math.cos(Math.PI*0.45)*r*0.8, ey = Math.sin(Math.PI*0.45)*r*0.8;
+    c.beginPath(); c.moveTo(ex,-ey); c.lineTo(ex,ey); c.stroke();
+  },
+  crystalStaff(c, r){
+    c.rotate(0.45);
+    c.fillStyle = '#4a5a6a'; c.fillRect(-r*0.05, -r*0.85, r*0.1, r*1.35);
+    c.beginPath(); c.moveTo(0,-r*1.3); c.lineTo(r*0.17,-r*0.95); c.lineTo(0,-r*0.65); c.lineTo(-r*0.17,-r*0.95); c.closePath();
+    c.fillStyle = '#5ae0ff'; c.shadowColor = '#5ae0ff'; c.shadowBlur = r*0.7; c.fill(); c.shadowBlur = 0;
+  },
+  archStaff(c, r){
+    c.rotate(0.45);
+    c.fillStyle = '#8a5ac0'; c.fillRect(-r*0.06, -r*0.9, r*0.12, r*1.4);
+    c.strokeStyle = '#ffd36b'; c.lineWidth = r*0.07;                                // 금빛 고리
+    c.beginPath(); c.arc(0, -r*1.05, r*0.28, 0, Math.PI*2); c.stroke();
+    c.beginPath(); c.arc(0, -r*1.05, r*0.15, 0, Math.PI*2);
+    c.fillStyle = '#ff7bd5'; c.shadowColor = '#ff7bd5'; c.shadowBlur = r*0.9; c.fill(); c.shadowBlur = 0;
+  },
+  staff(c, r){
+    c.rotate(0.45);
+    c.fillStyle = '#6b4a2a'; c.fillRect(-r*0.05, -r*0.85, r*0.1, r*1.35);          // 지팡이 몸체
+    c.beginPath(); c.arc(0, -r*0.95, r*0.2, 0, Math.PI*2);
+    c.fillStyle = '#b57bff'; c.shadowColor = '#b57bff'; c.shadowBlur = r*0.6; c.fill(); // 보석(은은한 발광)
+    c.shadowBlur = 0;
+  }
+};
+function drawWeaponLayer(ctx2, px, py, r, facing, visual){
+  if(!visual || !WEAPON_DRAWERS[visual]) return;
+  ctx2.save();
+  ctx2.translate(px, py);
+  if(facing && facing[0] < -0.15) ctx2.scale(-1,1); // 캐릭터와 같은 방향으로 반전
+  ctx2.translate(r*0.4, r*0.1);                     // 손 위치
+  WEAPON_DRAWERS[visual](ctx2, r);
+  ctx2.restore();
+}
+
+function drawCat(ctx2, px, py, r, facing, opts){
+  opts = opts || {};
+  const chasing = !!opts.chasing, dark = !!opts.dark;
+  // 치즈코숏(주황 치즈태비) 배색
+  const bodyColor = dark ? '#141414' : (chasing ? '#e08a2e' : '#eda552');
+  const earColor  = dark ? '#0c0c0c' : (chasing ? '#c76b1c' : '#d98a3a');
+  const stripeColor = dark ? 'rgba(255,255,255,.04)' : 'rgba(150,80,20,.45)';
+
+  ctx2.save();
+  ctx2.translate(px, py);
+  if(facing && facing[0] < -0.15) ctx2.scale(-1,1);
+
+  // 그림자
+  ctx2.beginPath(); ctx2.ellipse(0, r*0.8, r*0.98, r*0.32, 0,0,Math.PI*2);
+  ctx2.fillStyle = 'rgba(0,0,0,.28)'; ctx2.fill();
+
+  // 꼬리
+  ctx2.strokeStyle = bodyColor; ctx2.lineWidth = r*0.22; ctx2.lineCap = 'round';
+  ctx2.beginPath();
+  ctx2.moveTo(-r*0.8, r*0.15);
+  ctx2.quadraticCurveTo(-r*1.6, -r*0.3, -r*1.15, -r*0.9);
+  ctx2.stroke();
+
+  // 몸통
+  ctx2.beginPath(); ctx2.ellipse(0,0, r*1.0, r*0.85, 0,0,Math.PI*2);
+  ctx2.fillStyle = bodyColor; ctx2.fill();
+  // 입체감
+  ctx2.beginPath(); ctx2.ellipse(-r*0.28,-r*0.28, r*0.5, r*0.38, -0.4, 0, Math.PI*2);
+  ctx2.fillStyle = 'rgba(255,255,255,.16)'; ctx2.fill();
+  ctx2.beginPath(); ctx2.ellipse(r*0.32, r*0.3, r*0.55, r*0.4, 0.3, 0, Math.PI*2);
+  ctx2.fillStyle = 'rgba(0,0,0,.2)'; ctx2.fill();
+
+  // 치즈태비 줄무늬 (등 쪽에 짧은 곡선 몇 개)
+  ctx2.strokeStyle = stripeColor; ctx2.lineWidth = r*0.09; ctx2.lineCap = 'round';
+  for(const sx of [-r*0.35, -r*0.05, r*0.25]){
+    ctx2.beginPath();
+    ctx2.moveTo(sx, -r*0.55);
+    ctx2.quadraticCurveTo(sx+r*0.08, -r*0.15, sx, r*0.2);
+    ctx2.stroke();
+  }
+
+  // 뾰족한 귀
+  ctx2.fillStyle = earColor;
+  ctx2.beginPath();
+  ctx2.moveTo(-r*0.7,-r*0.55); ctx2.lineTo(-r*0.85,-r*1.15); ctx2.lineTo(-r*0.32,-r*0.72); ctx2.closePath(); ctx2.fill();
+  ctx2.beginPath();
+  ctx2.moveTo(r*0.7,-r*0.55); ctx2.lineTo(r*0.85,-r*1.15); ctx2.lineTo(r*0.32,-r*0.72); ctx2.closePath(); ctx2.fill();
+
+  // 눈 - 추적 중이면 붉게, 평소엔 노란빛, 시야차단이면 무채색
+  const eyeColor = dark ? '#3a3a3a' : (chasing ? '#ff3b3b' : '#ffd166');
+  ctx2.fillStyle = eyeColor;
+  ctx2.beginPath(); ctx2.ellipse(r*0.32,-r*0.1, r*0.13, r*0.09, 0,0,Math.PI*2); ctx2.fill();
+  ctx2.fillStyle = '#1a1a1a';
+  ctx2.beginPath(); ctx2.ellipse(r*0.32,-r*0.1, r*0.04, r*0.07, 0,0,Math.PI*2); ctx2.fill();
+
+  // 코
+  ctx2.fillStyle = dark ? '#333' : '#ffab8a';
+  ctx2.beginPath();
+  ctx2.moveTo(r*0.85, r*0.02); ctx2.lineTo(r*0.95, r*0.1); ctx2.lineTo(r*0.85, r*0.16); ctx2.closePath();
+  ctx2.fill();
+
+  ctx2.restore();
+}
+
+function drawGlyph(tx,ty,glyph,color){
+  ctx.font = (TILE*0.7)+'px sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle = color;
+  ctx.fillText(glyph, tx*TILE+TILE/2, ty*TILE+TILE/2);
+}
+
+// 방 장식용 벡터 드로잉 (순수 시각 요소 - 충돌 없음)
+function drawCrate(tx,ty){
+  const x = tx*TILE, y = ty*TILE, s = TILE*0.62, off = (TILE-s)/2;
+  ctx.fillStyle = 'rgba(0,0,0,.25)';
+  ctx.fillRect(x+off+2, y+off+4, s, s*0.2);
+  ctx.fillStyle = '#8a5a34';
+  ctx.fillRect(x+off, y+off, s, s);
+  ctx.strokeStyle = '#5c3a20'; ctx.lineWidth = Math.max(1, TILE*0.05);
+  ctx.strokeRect(x+off, y+off, s, s);
+  ctx.beginPath();
+  ctx.moveTo(x+off, y+off); ctx.lineTo(x+off+s, y+off+s);
+  ctx.moveTo(x+off+s, y+off); ctx.lineTo(x+off, y+off+s);
+  ctx.stroke();
+}
+function drawTorch(tx,ty){
+  const x = tx*TILE+TILE/2, y = ty*TILE+TILE/2;
+  const flick = 0.8 + 0.2*Math.sin(performance.now()/120 + tx*13 + ty*7);
+  ctx.fillStyle = '#5c3a20';
+  ctx.fillRect(x-TILE*0.06, y-TILE*0.1, TILE*0.12, TILE*0.32);
+  ctx.beginPath();
+  ctx.ellipse(x, y-TILE*0.28*flick, TILE*0.16*flick, TILE*0.24*flick, 0, 0, Math.PI*2);
+  ctx.fillStyle = '#ff9d3d'; ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(x, y-TILE*0.24*flick, TILE*0.09*flick, TILE*0.14*flick, 0, 0, Math.PI*2);
+  ctx.fillStyle = '#ffe27a'; ctx.fill();
+}
+function drawCoin(tx,ty){
+  const x = tx*TILE+TILE/2, y = ty*TILE+TILE/2;
+  // 살짝 위아래로 둥실 + 좌우로 스쿼시해서 도는 것처럼 보이는 애니메이션 (그라데이션 없이 저비용)
+  const bob = Math.sin(performance.now()/260 + tx*5 + ty*3) * TILE*0.05;
+  const spin = Math.cos(performance.now()/300 + tx*7 + ty*4);
+  const rx = TILE*0.24*Math.max(0.25, Math.abs(spin));
+  const ry = TILE*0.24;
+  ctx.save();
+  ctx.translate(x, y+bob);
+  // 그림자
+  ctx.beginPath(); ctx.ellipse(0, TILE*0.22, TILE*0.2, TILE*0.07, 0, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fill();
+  // 동전 몸체
+  ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI*2);
+  ctx.fillStyle = spin >= 0 ? '#f4c430' : '#c99a1f';
+  ctx.fill();
+  ctx.strokeStyle = '#a67c1a'; ctx.lineWidth = Math.max(1, TILE*0.03);
+  ctx.stroke();
+  // 반짝임(하이라이트) - 앞면 보일 때만
+  if(spin >= 0){
+    ctx.beginPath(); ctx.ellipse(-rx*0.3, -ry*0.3, rx*0.35, ry*0.25, -0.4, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawPortal(tx,ty){
+  const x = tx*TILE+TILE/2, y = ty*TILE+TILE/2;
+  const t = performance.now()/1000;
+  const R = TILE*0.55;
+  ctx.save();
+
+  // 은은한 발광 + 중심 블랙홀
+  ctx.shadowColor = 'rgba(90,180,255,.9)';
+  ctx.shadowBlur = TILE*0.6;
+  ctx.beginPath(); ctx.arc(x, y, R*0.32, 0, Math.PI*2);
+  ctx.fillStyle = '#050915'; ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // 회전하는 나선형 띠 (겹겹이, 각자 다른 속도/각도로 돌아 소용돌이처럼 보이게)
+  for(let i=0;i<3;i++){
+    const rr = R*(0.42+i*0.2);
+    const a0 = t*(1.4+i*0.3) + i*2.1;
+    ctx.strokeStyle = `rgba(${90+i*30},${170+i*15},255,${0.55-i*0.12})`;
+    ctx.lineWidth = TILE*0.08;
+    ctx.beginPath();
+    ctx.arc(x, y, rr, a0, a0+Math.PI*1.3);
+    ctx.stroke();
+  }
+  // 바깥 발광 링
+  ctx.strokeStyle = 'rgba(150,210,255,.35)';
+  ctx.lineWidth = TILE*0.05;
+  ctx.beginPath(); ctx.arc(x, y, R*0.95, 0, Math.PI*2); ctx.stroke();
+
+  // 주위를 떠다니는 작은 파티클
+  for(let i=0;i<5;i++){
+    const ang = t*0.8 + i*(Math.PI*2/5);
+    const dist = R*(0.95+0.25*Math.sin(t*1.3+i));
+    const px2 = x+Math.cos(ang)*dist, py2 = y+Math.sin(ang)*dist*0.6;
+    const s = TILE*(0.06+0.02*Math.sin(t*2+i));
+    ctx.fillStyle = i%2===0 ? 'rgba(255,255,255,.85)' : 'rgba(190,215,255,.6)';
+    ctx.fillRect(px2-s/2, py2-s/2, s, s);
+  }
+  ctx.restore();
+}
+
+/* ============================================================
+   8. 메인 루프
+   ============================================================ */
+function loop(t){
+  const dt = Math.min(0.05, (t - (state.lastTime||t))/1000);
+  state.lastTime = t;
+  if(state.running){
+    updatePlayer(dt);
+    if(state.running) updateEnemy(dt);
+  }
+  if(state.scene === 'boss'){ updateBossPlayerMovement(dt); updateBossMovement(dt); updateBossCombat(dt); }
+  render();
+  requestAnimationFrame(loop);
+}
+
+// --- 직업 데이터 (배열로 분리 - 2단계에서 전투방식/무기 필드가 여기에 더 붙을 예정) ---
+const JOBS = [
+  {id:'warrior', name:'검사', desc:'근접 무기, 가까이서 확실한 데미지'},
+  {id:'archer',  name:'궁수', desc:'원거리 무기, 멀리서 안전하게 공격'},
+  {id:'mage',    name:'마법사', desc:'사정거리 제한 없음, 가까울수록 강력'}
+];
+
+document.querySelectorAll('.jobBtn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    state.player.job = btn.dataset.job;
+    document.getElementById('jobSelectOverlay').classList.remove('show');
+    startStage(1);
+  });
+});
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
